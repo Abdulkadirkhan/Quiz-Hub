@@ -90,17 +90,6 @@ export default function AdminLobby() {
             <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
               <h2 className="text-xl font-bold mb-6 text-yellow-400">Game Setup</h2>
 
-              <div className="mb-6">
-                <label className="block text-sm font-semibold text-gray-400 mb-2">Number of Teams</label>
-                <div className="flex gap-2">
-                  {[2, 3, 4].map((n) => (
-                    <button key={n} onClick={() => handleNumTeamsChange(n)} className={`flex-1 py-2 rounded-lg font-bold transition ${numTeams === n ? "bg-yellow-400 text-black" : "bg-gray-800 text-white hover:bg-gray-700"}`}>
-                      {n} Teams
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="mb-6 space-y-3">
                 <label className="block text-sm font-semibold text-gray-400 mb-2">Team Names</label>
                 {teamNames.map((name, i) => (
@@ -123,26 +112,12 @@ export default function AdminLobby() {
 
             <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 flex flex-col gap-4">
               <h2 className="text-xl font-bold text-yellow-400">Questions</h2>
-              <div className="bg-gray-800 rounded-xl p-4 flex items-center justify-between">
-                <div>
-                  <p className="text-white font-bold text-lg">{questions.length} questions loaded</p>
-                  <p className="text-gray-400 text-sm">Saved in this browser</p>
-                </div>
-                <button
-                  onClick={() => navigate("/admin/questions")}
-                  className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-black text-sm transition"
-                >
-                  Manage →
-                </button>
-              </div>
-              <div className="space-y-2 flex-1 overflow-y-auto max-h-72">
-                {questions.map((q, i) => (
-                  <div key={q.id} className="bg-gray-800 rounded-lg px-3 py-2">
-                    <p className="text-sm text-white font-semibold">{i + 1}. {q.text}</p>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-gray-600 text-center">Questions are auto-loaded from the manager page</p>
+              <button
+                onClick={() => navigate("/admin/questions")}
+                className="bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-4 rounded-xl font-black text-lg transition"
+              >
+                Manage Questions →
+              </button>
             </div>
           </div>
         ) : (
