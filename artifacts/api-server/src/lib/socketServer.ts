@@ -39,8 +39,22 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       io.to(`session:${data.sessionId}`).emit("game:question", { question, state });
     });
 
+    socket.on("admin:show_question", (data: { sessionId: string; questionIndex: number }) => {
+      const question = gameStore.showQuestion(data.sessionId, data.questionIndex);
+      if (!question) return;
+      const state = gameStore.getPublicState(data.sessionId);
+      io.to(`session:${data.sessionId}`).emit("game:question", { question, state });
+    });
+
     socket.on("admin:award_point", (data: { sessionId: string; teamId: string }) => {
       gameStore.awardPoint(data.sessionId, data.teamId);
+      const state = gameStore.getPublicState(data.sessionId);
+      io.to(`session:${data.sessionId}`).emit("game:score_update", state);
+    });
+
+    socket.on("admin:adjust_score", (data: { sessionId: string; teamId: string; delta: number }) => {
+      const team = gameStore.adjustScore(data.sessionId, data.teamId, data.delta);
+      if (!team) return;
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:score_update", state);
     });

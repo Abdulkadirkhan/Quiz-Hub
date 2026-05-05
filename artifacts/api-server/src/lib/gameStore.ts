@@ -124,6 +124,22 @@ class GameStore {
     return s.questions[next];
   }
 
+  showQuestion(sessionId: string, index: number): Question | null {
+    const s = this.sessions.get(sessionId);
+    if (!s) return null;
+    if (index < 0 || index >= s.questions.length) return null;
+    s.currentQuestionIndex = index;
+    s.status = "question_active";
+    s.buzzedBy = null;
+    s.miniGameType = null;
+    s.numberSurvivalState = null;
+    s.faceMergeState = null;
+    s.mysteryPuzzleState = null;
+    for (const p of s.players.values()) p.hasBuzzed = false;
+    logger.info({ sessionId, questionIndex: index }, "Show specific question");
+    return s.questions[index];
+  }
+
   buzz(sessionId: string, socketId: string): BuzzEvent | null {
     const s = this.sessions.get(sessionId);
     if (!s) return null;
@@ -167,6 +183,16 @@ class GameStore {
     team.score += 1;
     s.status = "round_end";
     logger.info({ sessionId, teamName: team.name, newScore: team.score }, "Point awarded");
+    return team;
+  }
+
+  adjustScore(sessionId: string, teamId: string, delta: number): Team | null {
+    const s = this.sessions.get(sessionId);
+    if (!s) return null;
+    const team = s.teams.find((t) => t.id === teamId);
+    if (!team) return null;
+    team.score = Math.max(0, team.score + delta);
+    logger.info({ sessionId, teamName: team.name, delta, newScore: team.score }, "Score adjusted");
     return team;
   }
 

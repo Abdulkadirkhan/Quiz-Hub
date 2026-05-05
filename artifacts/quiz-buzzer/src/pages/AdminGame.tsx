@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { getSocket } from "@/lib/socket";
-import { GameState, MiniGameType, MysteryPuzzleClue } from "@/lib/types";
+import { GameState, MiniGameType, MysteryPuzzleClue, Question } from "@/lib/types";
 import { getTeamColors } from "@/lib/teamColors";
 import PacManGame from "./PacManGame";
 import NumberSurvivalGame from "./NumberSurvivalGame";
@@ -10,6 +10,14 @@ import MysteryPuzzleGame from "./MysteryPuzzleGame";
 import MiniGameSelector from "./MiniGameSelector";
 
 interface MiniGameResult { winner: "team1" | "team2" | "tie"; scores: [number, number]; }
+
+function loadQuestions(): Question[] {
+  try {
+    const raw = localStorage.getItem("quiz_questions");
+    if (raw) return JSON.parse(raw) as Question[];
+  } catch {}
+  return [];
+}
 
 export default function AdminGame() {
   const [, params] = useRoute("/admin/game/:sessionId");
@@ -21,6 +29,10 @@ export default function AdminGame() {
   const [buzzFlash, setBuzzFlash] = useState(false);
   const [miniGameActive, setMiniGameActive] = useState(false);
   const [showSelector, setShowSelector] = useState(false);
+  const [showQuestionPicker, setShowQuestionPicker] = useState(false);
+  const [showManualScore, setShowManualScore] = useState(false);
+  const [questions, setQuestions] = useState<Question[]>(loadQuestions);
+  const [usedQuestionIndices, setUsedQuestionIndices] = useState<Set<number>>(new Set());
   const [miniGameResult, setMiniGameResult] = useState<{ winnerTeamId?: string; label: string } | null>(null);
   const [miniGameKey, setMiniGameKey] = useState(0);
 
@@ -37,6 +49,13 @@ export default function AdminGame() {
   };
   const stopTimer = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
 
+  // Refresh questions list if user manages questions in another tab
+  useEffect(() => {
+    const handler = () => setQuestions(loadQuestions());
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
+
   useEffect(() => {
     const socket = socketRef.current;
     socket.emit("session:get_state", { sessionId }, (res: { state: GameState }) => {
@@ -48,6 +67,9 @@ export default function AdminGame() {
       setGameState(state); setBuzzFlash(false); setMiniGameActive(false); setMiniGameResult(null);
       const q = state.currentQuestion;
       if (q?.timeLimit) { setTimer(q.timeLimit); startTimer(q.timeLimit); }
+      if (state.currentQuestionIndex >= 0) {
+        setUsedQuestionIndices((prev) => new Set(prev).add(state.currentQuestionIndex));
+      }
     });
     socket.on("game:buzzed", ({ state }: { state: GameState }) => {
       setGameState(state); setBuzzFlash(true); stopTimer(); playBuzzSound();
@@ -141,11 +163,16 @@ export default function AdminGame() {
     handleMiniGameEnd(winnerTeamId);
   }, [gameState, handleMiniGameEnd]);
 
+  const handlePickQuestion = (index: number) => {
+    setShowQuestionPicker(false);
+    emit("admin:show_question", { questionIndex: index });
+  };
+
   if (!gameState) {
     return <div className="min-h-screen bg-gray-950 flex items-center justify-center"><div className="text-white text-xl">Loading game…</div></div>;
   }
 
-  const { teams, status, currentQuestion, currentQuestionIndex, totalQuestions, buzzedBy, players, miniGameType } = gameState;
+  const { teams, status, currentQuestion, currentQuestionIndex, buzzedBy, players, miniGameType } = gameState;
   const buzzedTeam = buzzedBy ? teams.find((t) => t.id === buzzedBy.teamId) : null;
   const timerPercent = timer !== null && currentQuestion?.timeLimit ? (timer / currentQuestion.timeLimit) * 100 : 100;
   const isBuzzerMode = status === "buzzer_active" || status === "buzzed";
@@ -161,6 +188,101 @@ export default function AdminGame() {
     <div className={`min-h-screen transition-all duration-300 ${buzzFlash ? "bg-orange-950" : "bg-gray-950"} text-white`}>
       {showSelector && <MiniGameSelector onSelect={handleSelectMiniGame} onClose={() => setShowSelector(false)} />}
 
+      {/* Question picker modal */}
+      {showQuestionPicker && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowQuestionPicker(false)}>
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <h3 className="text-xl font-black text-yellow-400">📋 Pick a Question</h3>
+              <button onClick={() => setShowQuestionPicker(false)} className="text-gray-400 hover:text-white text-2xl leading-none">×</button>
+            </div>
+            <div className="overflow-y-auto p-4 flex-1">
+              {questions.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-gray-400 mb-4">No questions saved in this browser yet.</p>
+                  <button onClick={() => navigate("/admin/questions")} className="bg-yellow-400 text-black px-5 py-2 rounded-lg font-bold hover:bg-yellow-300 transition">
+                    Manage Questions →
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {questions.map((q, i) => {
+                    const isCurrent = i === currentQuestionIndex;
+                    const isUsed = usedQuestionIndices.has(i);
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => handlePickQuestion(i)}
+                        className={`w-full text-left rounded-lg p-3 transition border ${
+                          isCurrent ? "bg-yellow-400/10 border-yellow-400"
+                          : isUsed ? "bg-gray-800/50 border-gray-700 hover:bg-gray-800"
+                          : "bg-gray-800 border-gray-700 hover:bg-gray-700 hover:border-yellow-400"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <p className="text-sm text-white font-semibold">
+                              <span className="text-gray-500 mr-2">{i + 1}.</span>
+                              {q.text}
+                            </p>
+                            {q.choices && (
+                              <p className="text-xs text-gray-500 mt-1 truncate">
+                                {q.choices.map((c) => `${c.label}: ${c.text}`).join("  •  ")}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            {isCurrent && <span className="text-xs font-bold text-yellow-400 whitespace-nowrap">▶ CURRENT</span>}
+                            {!isCurrent && isUsed && <span className="text-xs text-gray-500 whitespace-nowrap">✓ shown</span>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual score panel modal */}
+      {showManualScore && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowManualScore(false)}>
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <div>
+                <h3 className="text-xl font-black text-yellow-400">✏️ Manual Score</h3>
+                <p className="text-xs text-gray-400 mt-1">Adjust scores when you ask a question verbally</p>
+              </div>
+              <button onClick={() => setShowManualScore(false)} className="text-gray-400 hover:text-white text-2xl leading-none">×</button>
+            </div>
+            <div className="p-5 space-y-4">
+              {teams.map((team) => {
+                const colors = getTeamColors(team.color);
+                return (
+                  <div key={team.id} className={`rounded-xl p-4 border-2 ${colors.border} ${colors.light}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className={`text-lg font-black ${colors.text}`}>{team.name}</div>
+                      <div className={`text-3xl font-black ${colors.text}`}>{team.score}</div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <button onClick={() => emit("admin:adjust_score", { teamId: team.id, delta: -5 })} className="bg-red-700 hover:bg-red-600 text-white py-2 rounded-lg font-bold text-sm transition">−5</button>
+                      <button onClick={() => emit("admin:adjust_score", { teamId: team.id, delta: -1 })} className="bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-bold text-sm transition">−1</button>
+                      <button onClick={() => emit("admin:adjust_score", { teamId: team.id, delta: 1 })} className="bg-green-600 hover:bg-green-500 text-white py-2 rounded-lg font-bold text-sm transition">+1</button>
+                      <button onClick={() => emit("admin:adjust_score", { teamId: team.id, delta: 5 })} className="bg-green-700 hover:bg-green-600 text-white py-2 rounded-lg font-bold text-sm transition">+5</button>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="pt-2 text-center">
+                <button onClick={() => setShowManualScore(false)} className="text-gray-400 hover:text-white text-sm">Done</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
           <div>
@@ -168,6 +290,16 @@ export default function AdminGame() {
             <p className="text-gray-500 text-sm">Session: {sessionId}</p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            {!miniGameActive && (
+              <button onClick={() => setShowQuestionPicker(true)} className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2">
+                📋 Questions
+              </button>
+            )}
+            {!miniGameActive && (
+              <button onClick={() => setShowManualScore(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2">
+                ✏️ Manual Score
+              </button>
+            )}
             {!miniGameActive && status === "buzzer_active" && (
               <button onClick={() => emit("admin:close_buzzer")} className="px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white">
                 🔔 Close Buzzer
@@ -253,10 +385,13 @@ export default function AdminGame() {
         <div className="bg-gray-900 rounded-2xl p-6 mb-6 border border-gray-800 min-h-40">
           {status === "playing" && currentQuestionIndex === -1 && (
             <div className="text-center py-8">
-              <p className="text-gray-400 text-xl mb-6">Game is live! Show a question, open the buzzer, or start a mini-game.</p>
+              <p className="text-gray-400 text-xl mb-6">Game is live! Pick a question, ask one yourself, or start a mini-game.</p>
               <div className="flex gap-4 justify-center flex-wrap">
-                <button onClick={() => emit("admin:next_question")} className="bg-yellow-400 text-black px-8 py-3 rounded-xl font-black text-lg hover:bg-yellow-300 transition">
-                  Show First Question
+                <button onClick={() => setShowQuestionPicker(true)} className="bg-yellow-400 text-black px-8 py-3 rounded-xl font-black text-lg hover:bg-yellow-300 transition">
+                  📋 Pick Question
+                </button>
+                <button onClick={() => setShowManualScore(true)} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black text-lg hover:bg-blue-500 transition">
+                  ✏️ Manual Score
                 </button>
                 <button onClick={() => emit("admin:open_buzzer")} className="bg-orange-600 text-white px-8 py-3 rounded-xl font-black text-lg hover:bg-orange-500 transition">
                   🔔 Open Buzzer
@@ -271,7 +406,9 @@ export default function AdminGame() {
           {(status === "question_active" || status === "buzzed" || status === "round_end") && currentQuestion && (
             <div>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-gray-400 text-sm">Question {currentQuestionIndex + 1} of {totalQuestions}</span>
+                <span className="text-gray-400 text-sm">
+                  Question {currentQuestionIndex + 1}{questions.length > 0 ? ` of ${questions.length}` : ""}
+                </span>
                 {timer !== null && status === "question_active" && (
                   <div className="flex items-center gap-2">
                     <div className="w-32 bg-gray-700 rounded-full h-2">
@@ -321,6 +458,7 @@ export default function AdminGame() {
             <p className="text-gray-400 text-sm mb-1">FIRST BUZZ!</p>
             <p className="text-3xl font-black text-white">{buzzedBy.playerName}</p>
             <p className="text-lg font-bold text-orange-400">{buzzedBy.teamName}</p>
+            {buzzedTeam && <p className="text-xs text-gray-500 mt-1">({buzzedTeam.name})</p>}
           </div>
         )}
 
@@ -344,8 +482,8 @@ export default function AdminGame() {
             </>
           )}
           {status === "round_end" && (
-            <button onClick={() => emit("admin:next_question")} className="bg-yellow-400 text-black px-8 py-3 rounded-xl font-black text-lg hover:bg-yellow-300 transition">
-              {currentQuestionIndex + 1 >= totalQuestions ? "End Game" : "Next Question"}
+            <button onClick={() => setShowQuestionPicker(true)} className="bg-yellow-400 text-black px-8 py-3 rounded-xl font-black text-lg hover:bg-yellow-300 transition">
+              📋 Pick Next Question
             </button>
           )}
           {status === "question_active" && teams.map((team) => {
