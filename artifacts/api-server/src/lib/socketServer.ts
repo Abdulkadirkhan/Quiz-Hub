@@ -59,6 +59,13 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       io.to(`session:${data.sessionId}`).emit("game:score_update", state);
     });
 
+    socket.on("admin:reset_round", (data: { sessionId: string }) => {
+      const ok = gameStore.resetRound(data.sessionId);
+      if (!ok) return;
+      const state = gameStore.getPublicState(data.sessionId);
+      io.to(`session:${data.sessionId}`).emit("game:round_reset", state);
+    });
+
     socket.on("admin:skip_question", (data: { sessionId: string }) => {
       gameStore.skipQuestion(data.sessionId);
       const state = gameStore.getPublicState(data.sessionId);
@@ -205,8 +212,8 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       else io.to(`session:${data.sessionId}`).emit("game:number_done", state);
     });
 
-    socket.on("admin:face_merge_setup", (data: { sessionId: string; image1: string; image2: string }) => {
-      const ok = gameStore.setFaceMergeImages(data.sessionId, data.image1, data.image2);
+    socket.on("admin:face_merge_setup", (data: { sessionId: string; image1: string; image2: string; merged?: string | null }) => {
+      const ok = gameStore.setFaceMergeImages(data.sessionId, data.image1, data.image2, data.merged ?? null);
       if (!ok) return;
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:face_merge_updated", state);

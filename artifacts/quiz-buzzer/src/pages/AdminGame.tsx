@@ -77,6 +77,9 @@ export default function AdminGame() {
     });
     socket.on("game:score_update", (state: GameState) => setGameState(state));
     socket.on("game:round_end", (state: GameState) => { setGameState(state); stopTimer(); });
+    socket.on("game:round_reset", (state: GameState) => {
+      setGameState(state); stopTimer(); setMiniGameActive(false); setMiniGameResult(null); setBuzzFlash(false);
+    });
     socket.on("game:finished", (state: GameState) => { setGameState(state); stopTimer(); setMiniGameActive(false); });
     socket.on("game:buzz_reset", (state: GameState) => {
       setGameState(state); setBuzzFlash(false);
@@ -99,7 +102,7 @@ export default function AdminGame() {
 
     return () => {
       socket.off("game:question"); socket.off("game:buzzed"); socket.off("game:score_update");
-      socket.off("game:round_end"); socket.off("game:finished"); socket.off("game:buzz_reset");
+      socket.off("game:round_end"); socket.off("game:round_reset"); socket.off("game:finished"); socket.off("game:buzz_reset");
       socket.off("game:player_joined"); socket.off("game:player_left");
       socket.off("game:minigame_started"); socket.off("game:minigame_ended");
       socket.off("game:buzzer_opened"); socket.off("game:buzzer_closed");
@@ -315,6 +318,16 @@ export default function AdminGame() {
                 🎮 Mini-Game
               </button>
             )}
+            <button
+              onClick={() => {
+                if (confirm("Reset the screen back to the live lobby? Scores will be kept.")) {
+                  emit("admin:reset_round");
+                }
+              }}
+              className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2"
+            >
+              🔄 Reset
+            </button>
             <button onClick={() => emit("admin:end_game")} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-sm transition">
               End Game
             </button>

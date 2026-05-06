@@ -110,13 +110,19 @@ export default function AdminLobby() {
               </button>
             </div>
 
-            <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 flex flex-col gap-4">
+            <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 flex flex-col gap-3">
               <h2 className="text-xl font-bold text-yellow-400">Questions</h2>
               <button
                 onClick={() => navigate("/admin/questions")}
                 className="bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-4 rounded-xl font-black text-lg transition"
               >
                 Manage Questions →
+              </button>
+              <button
+                onClick={() => navigate("/admin/minigames")}
+                className="bg-pink-600 hover:bg-pink-500 text-white px-6 py-4 rounded-xl font-black text-lg transition"
+              >
+                🎮 Manage Mini-Games →
               </button>
             </div>
           </div>

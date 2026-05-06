@@ -26,6 +26,7 @@ export interface FaceMergeState {
   phase: "setup" | "guessing" | "revealed";
   image1: string | null;
   image2: string | null;
+  merged: string | null;
 }
 
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
@@ -196,6 +197,21 @@ class GameStore {
     return team;
   }
 
+  resetRound(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s) return false;
+    s.currentQuestionIndex = -1;
+    s.status = "playing";
+    s.buzzedBy = null;
+    s.miniGameType = null;
+    s.numberSurvivalState = null;
+    s.faceMergeState = null;
+    s.mysteryPuzzleState = null;
+    for (const p of s.players.values()) p.hasBuzzed = false;
+    logger.info({ sessionId }, "Round reset to live screen");
+    return true;
+  }
+
   skipQuestion(sessionId: string): void {
     const s = this.sessions.get(sessionId);
     if (!s) return;
@@ -231,15 +247,16 @@ class GameStore {
     const s = this.sessions.get(sessionId);
     if (!s) return false;
     s.miniGameType = "face_merge";
-    s.faceMergeState = { phase: "setup", image1: null, image2: null };
+    s.faceMergeState = { phase: "setup", image1: null, image2: null, merged: null };
     return true;
   }
 
-  setFaceMergeImages(sessionId: string, image1: string, image2: string): boolean {
+  setFaceMergeImages(sessionId: string, image1: string, image2: string, merged?: string | null): boolean {
     const s = this.sessions.get(sessionId);
     if (!s || !s.faceMergeState) return false;
     s.faceMergeState.image1 = image1;
     s.faceMergeState.image2 = image2;
+    s.faceMergeState.merged = merged ?? null;
     s.faceMergeState.phase = "guessing";
     s.buzzedBy = null;
     for (const p of s.players.values()) p.hasBuzzed = false;
@@ -374,7 +391,7 @@ class GameStore {
       };
     } else if (s.miniGameType === "face_merge" && s.faceMergeState) {
       const fm = s.faceMergeState;
-      miniGameData = { type: "face_merge", phase: fm.phase, image1: fm.image1, image2: fm.image2 };
+      miniGameData = { type: "face_merge", phase: fm.phase, image1: fm.image1, image2: fm.image2, merged: fm.merged };
     } else if (s.miniGameType === "mystery_puzzle" && s.mysteryPuzzleState) {
       const mp = s.mysteryPuzzleState;
       miniGameData = {

@@ -1,13 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useRoute } from "wouter";
 import { getSocket } from "@/lib/socket";
-import { GameState } from "@/lib/types";
+import { GameState, FaceMergeData, NumberSurvivalData, MysteryPuzzleData } from "@/lib/types";
 import { getTeamColors } from "@/lib/teamColors";
-
-const TEAM_FG: Record<string, string> = {
-  blue: "#60a5fa", red: "#f87171", green: "#4ade80",
-  yellow: "#facc15", purple: "#c084fc", orange: "#fb923c",
-};
 
 export default function SpectatorView() {
   const [, params] = useRoute("/watch/:sessionId");
@@ -36,6 +31,7 @@ export default function SpectatorView() {
     socket.on("game:buzzed", onBuzzed);
     socket.on("game:score_update", onState);
     socket.on("game:round_end", onState);
+    socket.on("game:round_reset", onState);
     socket.on("game:finished", onState);
     socket.on("game:buzz_reset", onState);
     socket.on("game:minigame_started", onState);
@@ -46,9 +42,10 @@ export default function SpectatorView() {
     socket.on("game:number_result", onState);
     socket.on("game:number_next_round", onState);
     socket.on("game:number_done", onState);
-    socket.on("game:reaction_waiting", onState);
-    socket.on("game:reaction_go", onState);
-    socket.on("game:reaction_result", onState);
+    socket.on("game:face_merge_updated", onState);
+    socket.on("game:mystery_updated", onState);
+    socket.on("game:buzzer_opened", onState);
+    socket.on("game:buzzer_closed", onState);
 
     return () => {
       socket.off("game:started", onState);
@@ -56,6 +53,7 @@ export default function SpectatorView() {
       socket.off("game:buzzed", onBuzzed);
       socket.off("game:score_update", onState);
       socket.off("game:round_end", onState);
+      socket.off("game:round_reset", onState);
       socket.off("game:finished", onState);
       socket.off("game:buzz_reset", onState);
       socket.off("game:minigame_started", onState);
@@ -66,9 +64,10 @@ export default function SpectatorView() {
       socket.off("game:number_result", onState);
       socket.off("game:number_next_round", onState);
       socket.off("game:number_done", onState);
-      socket.off("game:reaction_waiting", onState);
-      socket.off("game:reaction_go", onState);
-      socket.off("game:reaction_result", onState);
+      socket.off("game:face_merge_updated", onState);
+      socket.off("game:mystery_updated", onState);
+      socket.off("game:buzzer_opened", onState);
+      socket.off("game:buzzer_closed", onState);
     };
   }, [sessionId]);
 
@@ -92,15 +91,21 @@ export default function SpectatorView() {
     );
   }
 
-  const { teams, status, currentQuestion, currentQuestionIndex, totalQuestions, buzzedBy, players } = gameState;
+  const { teams, status, currentQuestion, currentQuestionIndex, totalQuestions, buzzedBy, players, miniGameType, miniGameData } = gameState;
   const sortedTeams = [...teams].sort((a, b) => b.score - a.score);
 
   const miniGameLabel: Record<string, string> = {
     pacman: "👾 Pac-Man Battle",
     number_survival: "🔢 Number Survival",
-    reaction_tap: "⚡ Reaction Tap",
-    memory: "🧠 Memory Challenge",
+    face_merge: "🖼️ Face Merge",
+    mystery_puzzle: "🔐 Mystery Puzzle",
   };
+
+  const fmData = miniGameType === "face_merge" ? (miniGameData as FaceMergeData | null) : null;
+  const nsData = miniGameType === "number_survival" ? (miniGameData as NumberSurvivalData | null) : null;
+  const mpData = miniGameType === "mystery_puzzle" ? (miniGameData as MysteryPuzzleData | null) : null;
+
+  const isMiniGame = status === "minigame" && miniGameType;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -134,15 +139,138 @@ export default function SpectatorView() {
           })}
         </div>
 
-        {status === "minigame" && gameState.miniGameType && (
-          <div className="bg-purple-950 border border-purple-700 rounded-2xl p-6 mb-6 text-center">
-            <div className="text-4xl mb-2">🎮</div>
-            <h2 className="text-2xl font-black text-purple-300">{miniGameLabel[gameState.miniGameType] || "Mini-Game"}</h2>
-            <p className="text-purple-400/60 text-sm mt-1">Mini-game in progress…</p>
+        {/* MINI-GAME RENDERINGS */}
+        {isMiniGame && miniGameType === "face_merge" && fmData && (
+          <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-pink-700">
+            <h2 className="text-xl font-black text-pink-400 text-center mb-5">🖼️ Face Merge</h2>
+            {fmData.phase === "setup" && (
+              <p className="text-center text-gray-400">Admin is setting up the merged image…</p>
+            )}
+            {fmData.phase === "guessing" && (
+              <div className="flex justify-center">
+                <div className="relative w-72 h-72 rounded-2xl overflow-hidden border-2 border-pink-500 shadow-2xl">
+                  {fmData.merged ? (
+                    <img src={fmData.merged} alt="Merged" className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <>
+                      {fmData.image1 && <img src={fmData.image1} alt="Face 1" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: 0.55 }} />}
+                      {fmData.image2 && <img src={fmData.image2} alt="Face 2" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: 0.55, mixBlendMode: "multiply" }} />}
+                    </>
+                  )}
+                  <div className="absolute bottom-2 left-0 right-0 text-center">
+                    <span className="bg-black/70 text-white text-xs px-3 py-1 rounded-full font-bold">Who are these people?</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {fmData.phase === "revealed" && (
+              <div className="space-y-4">
+                {fmData.merged && (
+                  <div className="flex justify-center">
+                    <img src={fmData.merged} alt="Merged" className="w-48 h-48 object-cover rounded-xl border-2 border-pink-500" />
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  {fmData.image1 && (
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 font-semibold mb-1">Person 1</p>
+                      <img src={fmData.image1} alt="Person 1" className="w-full h-48 object-cover rounded-xl border-2 border-pink-400" />
+                    </div>
+                  )}
+                  {fmData.image2 && (
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 font-semibold mb-1">Person 2</p>
+                      <img src={fmData.image2} alt="Person 2" className="w-full h-48 object-cover rounded-xl border-2 border-pink-400" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {status === "lobby" && (
+        {isMiniGame && miniGameType === "number_survival" && nsData && (
+          <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-blue-700">
+            <h2 className="text-xl font-black text-blue-400 text-center mb-2">🔢 Number Survival</h2>
+            <p className="text-center text-sm text-gray-400 mb-4">
+              Round {nsData.round} of {nsData.totalRounds} • {nsData.totalSurvivors} surviving
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {teams.map((team) => {
+                const colors = getTeamColors(team.color);
+                const survivors = nsData.teamSurvivors[team.id] || [];
+                return (
+                  <div key={team.id} className={`rounded-xl p-3 border-2 ${colors.border} bg-gray-800`}>
+                    <p className={`text-sm font-black ${colors.text} text-center mb-2`}>{team.name}</p>
+                    <div className="flex flex-wrap justify-center gap-1">
+                      {survivors.length === 0 ? (
+                        <span className="text-xs text-gray-500">Eliminated</span>
+                      ) : (
+                        survivors.map((name, i) => (
+                          <span key={i} className="text-xs bg-gray-900 px-2 py-0.5 rounded-full">{name}</span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {nsData.currentResult && nsData.phase === "revealing" && (
+              <div className="mt-4 bg-gray-800 rounded-xl p-3">
+                <p className="text-xs text-gray-400 text-center mb-2">Round {nsData.currentResult.round} picks</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {nsData.currentResult.choices.map((c, i) => {
+                    const isOut = nsData.currentResult!.eliminated.includes(c.socketId);
+                    return (
+                      <span key={i} className={`text-xs px-2 py-1 rounded-full ${isOut ? "bg-red-950 text-red-300 line-through" : "bg-green-950 text-green-300"}`}>
+                        {c.avatar} {c.name}: {c.number}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isMiniGame && miniGameType === "mystery_puzzle" && mpData && (
+          <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-amber-700">
+            <h2 className="text-xl font-black text-amber-400 text-center mb-3">🔐 Mystery Puzzle</h2>
+            {mpData.story && (
+              <p className="text-gray-300 text-sm italic text-center mb-4 px-2">"{mpData.story}"</p>
+            )}
+            <div className="space-y-2">
+              {mpData.clues.map((clue, i) => {
+                const revealed = mpData.revealedClues.includes(i);
+                const isCurrent = i === mpData.currentClueIndex;
+                return (
+                  <div key={i} className={`rounded-lg p-3 border ${isCurrent ? "border-amber-500 bg-amber-950/30" : revealed ? "border-green-700 bg-green-950/30" : "border-gray-700 bg-gray-800/50"}`}>
+                    <p className="text-xs text-gray-500 mb-1">Clue {i + 1}{revealed ? " ✓" : isCurrent ? " — current" : ""}</p>
+                    <p className="text-sm text-white">{clue.question}</p>
+                    {revealed && <p className="text-xs text-green-300 mt-1">→ Answer: {clue.answer}</p>}
+                  </div>
+                );
+              })}
+            </div>
+            {mpData.vaultRevealed && (
+              <div className="mt-4 bg-amber-950 border-2 border-amber-500 rounded-xl p-4 text-center">
+                <p className="text-amber-400 text-xs font-bold mb-1">VAULT CODE</p>
+                <p className="text-3xl font-black text-amber-300 font-mono tracking-widest">{mpData.vaultCode}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isMiniGame && miniGameType === "pacman" && (
+          <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-purple-700 text-center">
+            <div className="text-4xl mb-2">👾</div>
+            <h2 className="text-xl font-black text-purple-300">Pac-Man Battle</h2>
+            <p className="text-purple-400/70 text-sm mt-2">Players are competing on their devices — see the scoreboard above for results.</p>
+          </div>
+        )}
+
+        {/* QUESTION DISPLAY */}
+        {!isMiniGame && status === "lobby" && (
           <div className="bg-gray-900 rounded-2xl p-6 text-center border border-gray-800">
             <div className="text-5xl mb-3">⏳</div>
             <h2 className="text-xl font-bold text-white">Game hasn't started yet</h2>
@@ -150,7 +278,7 @@ export default function SpectatorView() {
           </div>
         )}
 
-        {(status === "question_active" || status === "buzzed" || status === "round_end") && currentQuestion && (
+        {!isMiniGame && (status === "question_active" || status === "buzzed" || status === "round_end") && currentQuestion && (
           <div className="bg-gray-900 rounded-2xl p-6 mb-4 border border-gray-800">
             <p className="text-gray-500 text-sm mb-3">Question {currentQuestionIndex + 1} of {totalQuestions}</p>
             <h2 className="text-2xl font-bold text-white mb-4">{currentQuestion.text}</h2>
@@ -175,11 +303,18 @@ export default function SpectatorView() {
           </div>
         )}
 
-        {status === "playing" && currentQuestionIndex === -1 && (
+        {!isMiniGame && status === "buzzer_active" && !buzzedBy && (
+          <div className="bg-orange-950 rounded-2xl p-6 text-center border-2 border-orange-500 animate-pulse">
+            <div className="text-4xl mb-2">🔔</div>
+            <h2 className="text-xl font-black text-white">Buzzer is open!</h2>
+            <p className="text-orange-300 text-sm mt-1">First team to buzz in wins the round</p>
+          </div>
+        )}
+
+        {!isMiniGame && status === "playing" && currentQuestionIndex === -1 && !buzzedBy && (
           <div className="bg-gray-900 rounded-2xl p-6 text-center border border-gray-800">
             <div className="text-5xl mb-3">🎯</div>
             <h2 className="text-xl font-bold text-white">Game is live!</h2>
-            <p className="text-gray-500 text-sm mt-1">First question coming up…</p>
           </div>
         )}
 

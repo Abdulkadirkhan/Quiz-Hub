@@ -25,6 +25,7 @@ export interface FaceMergeData {
   phase: "setup" | "guessing" | "revealed";
   image1: string | null;
   image2: string | null;
+  merged: string | null;
 }
 
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }

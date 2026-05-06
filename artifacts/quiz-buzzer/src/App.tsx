@@ -7,6 +7,7 @@ import AdminGame from "@/pages/AdminGame";
 import PlayerJoin from "@/pages/PlayerJoin";
 import SpectatorView from "@/pages/SpectatorView";
 import QuestionsPage from "@/pages/QuestionsPage";
+import MiniGameManager from "@/pages/MiniGameManager";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/" component={AdminLobby} />
       <Route path="/admin/game/:sessionId" component={AdminGame} />
       <Route path="/admin/questions" component={QuestionsPage} />
+      <Route path="/admin/minigames" component={MiniGameManager} />
       <Route path="/join/:sessionId/:teamId" component={PlayerJoin} />
       <Route path="/watch/:sessionId" component={SpectatorView} />
       <Route component={NotFound} />

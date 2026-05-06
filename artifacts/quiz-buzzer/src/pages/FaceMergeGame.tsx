@@ -11,13 +11,30 @@ interface Props {
   onEnd: (winnerTeamId?: string) => void;
 }
 
+interface SavedFaceMerge {
+  merged?: string | null;
+  image1?: string | null;
+  image2?: string | null;
+}
+
+function loadSavedFaceMerge(): SavedFaceMerge {
+  try {
+    const raw = localStorage.getItem("quiz_minigames_face_merge");
+    if (raw) return JSON.parse(raw) as SavedFaceMerge;
+  } catch {}
+  return {};
+}
+
 export default function FaceMergeGame({ teams, socket, sessionId, gameState, onEnd }: Props) {
   const [localState, setLocalState] = useState<GameState>(gameState);
-  const [image1Preview, setImage1Preview] = useState<string | null>(null);
-  const [image2Preview, setImage2Preview] = useState<string | null>(null);
+  const saved = loadSavedFaceMerge();
+  const [image1Preview, setImage1Preview] = useState<string | null>(saved.image1 ?? null);
+  const [image2Preview, setImage2Preview] = useState<string | null>(saved.image2 ?? null);
+  const [mergedPreview, setMergedPreview] = useState<string | null>(saved.merged ?? null);
   const [uploading, setUploading] = useState(false);
   const file1Ref = useRef<HTMLInputElement>(null);
   const file2Ref = useRef<HTMLInputElement>(null);
+  const fileMergedRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handler = (state: GameState) => setLocalState(state);
@@ -53,12 +70,24 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
     setImage2Preview(data);
   };
 
+  const handleFileMerged = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const data = await readFile(file);
+    setMergedPreview(data);
+  };
+
   const handleStartGuessing = useCallback(() => {
     if (!image1Preview || !image2Preview) return;
     setUploading(true);
-    socket.emit("admin:face_merge_setup", { sessionId, image1: image1Preview, image2: image2Preview });
+    socket.emit("admin:face_merge_setup", {
+      sessionId,
+      image1: image1Preview,
+      image2: image2Preview,
+      merged: mergedPreview,
+    });
     setTimeout(() => setUploading(false), 500);
-  }, [image1Preview, image2Preview, sessionId, socket]);
+  }, [image1Preview, image2Preview, mergedPreview, sessionId, socket]);
 
   const handleReveal = () => {
     socket.emit("admin:face_merge_reveal", { sessionId });
@@ -71,49 +100,80 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
   const fmData = localState.miniGameData as FaceMergeData | null;
   const phase = fmData?.phase ?? "setup";
   const buzzedBy = localState.buzzedBy;
-  const buzzedTeam = buzzedBy ? teams.find((t) => t.id === buzzedBy.teamId) : null;
+  const hasSavedSet = !!(saved.image1 && saved.image2);
 
   return (
     <div className="space-y-5">
       {phase === "setup" && (
         <div className="bg-gray-800 rounded-xl p-5 space-y-4">
-          <p className="text-white font-bold text-center text-lg">Upload two face images to merge</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col items-center gap-2">
-              <label className="text-sm text-gray-400 font-semibold">Person 1</label>
-              {image1Preview ? (
-                <img src={image1Preview} alt="Person 1" className="w-32 h-32 object-cover rounded-xl border-2 border-pink-500" />
-              ) : (
-                <div className="w-32 h-32 bg-gray-700 rounded-xl border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-4xl cursor-pointer hover:border-pink-500 transition" onClick={() => file1Ref.current?.click()}>
-                  📷
-                </div>
-              )}
-              <input ref={file1Ref} type="file" accept="image/*" className="hidden" onChange={handleFile1} />
-              <button onClick={() => file1Ref.current?.click()} className="text-xs text-pink-400 hover:text-pink-300 underline">
-                {image1Preview ? "Change" : "Select Image"}
-              </button>
+          {hasSavedSet && (
+            <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-xs text-green-300">
+              ✓ Pre-uploaded images loaded from "Manage Mini-Games"
             </div>
+          )}
+          <p className="text-white font-bold text-center text-lg">Face Merge — set up images</p>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-2 text-center">Merged image (shown to players during guessing)</label>
             <div className="flex flex-col items-center gap-2">
-              <label className="text-sm text-gray-400 font-semibold">Person 2</label>
-              {image2Preview ? (
-                <img src={image2Preview} alt="Person 2" className="w-32 h-32 object-cover rounded-xl border-2 border-pink-500" />
+              {mergedPreview ? (
+                <img src={mergedPreview} alt="Merged" className="w-40 h-40 object-cover rounded-xl border-2 border-pink-500" />
               ) : (
-                <div className="w-32 h-32 bg-gray-700 rounded-xl border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-4xl cursor-pointer hover:border-pink-500 transition" onClick={() => file2Ref.current?.click()}>
-                  📷
+                <div onClick={() => fileMergedRef.current?.click()} className="w-40 h-40 bg-gray-700 rounded-xl border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-gray-500 cursor-pointer hover:border-pink-500 transition">
+                  <span className="text-3xl">📷</span>
+                  <span className="text-xs mt-1">Optional</span>
                 </div>
               )}
-              <input ref={file2Ref} type="file" accept="image/*" className="hidden" onChange={handleFile2} />
-              <button onClick={() => file2Ref.current?.click()} className="text-xs text-pink-400 hover:text-pink-300 underline">
-                {image2Preview ? "Change" : "Select Image"}
+              <input ref={fileMergedRef} type="file" accept="image/*" className="hidden" onChange={handleFileMerged} />
+              <button onClick={() => fileMergedRef.current?.click()} className="text-xs text-pink-400 hover:text-pink-300 underline">
+                {mergedPreview ? "Change merged" : "Select merged image"}
               </button>
+              {!mergedPreview && (
+                <p className="text-xs text-gray-500 text-center">If you skip this, the app will auto-blend the two originals.</p>
+              )}
             </div>
           </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-2 text-center">Original images (shown on Reveal)</label>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col items-center gap-2">
+                <p className="text-xs text-gray-400 font-semibold">Person 1</p>
+                {image1Preview ? (
+                  <img src={image1Preview} alt="Person 1" className="w-32 h-32 object-cover rounded-xl border-2 border-pink-500" />
+                ) : (
+                  <div className="w-32 h-32 bg-gray-700 rounded-xl border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-4xl cursor-pointer hover:border-pink-500 transition" onClick={() => file1Ref.current?.click()}>
+                    📷
+                  </div>
+                )}
+                <input ref={file1Ref} type="file" accept="image/*" className="hidden" onChange={handleFile1} />
+                <button onClick={() => file1Ref.current?.click()} className="text-xs text-pink-400 hover:text-pink-300 underline">
+                  {image1Preview ? "Change" : "Select"}
+                </button>
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <p className="text-xs text-gray-400 font-semibold">Person 2</p>
+                {image2Preview ? (
+                  <img src={image2Preview} alt="Person 2" className="w-32 h-32 object-cover rounded-xl border-2 border-pink-500" />
+                ) : (
+                  <div className="w-32 h-32 bg-gray-700 rounded-xl border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-4xl cursor-pointer hover:border-pink-500 transition" onClick={() => file2Ref.current?.click()}>
+                    📷
+                  </div>
+                )}
+                <input ref={file2Ref} type="file" accept="image/*" className="hidden" onChange={handleFile2} />
+                <button onClick={() => file2Ref.current?.click()} className="text-xs text-pink-400 hover:text-pink-300 underline">
+                  {image2Preview ? "Change" : "Select"}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <button
             onClick={handleStartGuessing}
             disabled={!image1Preview || !image2Preview || uploading}
             className="w-full py-3 bg-pink-600 hover:bg-pink-500 text-white rounded-xl font-black text-lg transition disabled:opacity-40"
           >
-            {uploading ? "Sending..." : "🖼️ Show Merged Image to Players →"}
+            {uploading ? "Sending..." : "🖼️ Show to Players →"}
           </button>
         </div>
       )}
@@ -122,11 +182,13 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
         <div className="space-y-4">
           <div className="flex justify-center">
             <div className="relative w-64 h-64 rounded-2xl overflow-hidden border-2 border-pink-500 shadow-2xl">
-              {fmData.image1 && (
-                <img src={fmData.image1} alt="Face 1" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: 0.55, mixBlendMode: "normal" }} />
-              )}
-              {fmData.image2 && (
-                <img src={fmData.image2} alt="Face 2" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: 0.55, mixBlendMode: "multiply" }} />
+              {fmData.merged ? (
+                <img src={fmData.merged} alt="Merged" className="absolute inset-0 w-full h-full object-cover" />
+              ) : (
+                <>
+                  {fmData.image1 && <img src={fmData.image1} alt="Face 1" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: 0.55 }} />}
+                  {fmData.image2 && <img src={fmData.image2} alt="Face 2" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: 0.55, mixBlendMode: "multiply" }} />}
+                </>
               )}
               {phase === "guessing" && (
                 <div className="absolute bottom-2 left-0 right-0 text-center">
