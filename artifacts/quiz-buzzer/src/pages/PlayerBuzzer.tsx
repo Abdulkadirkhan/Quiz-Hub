@@ -114,7 +114,7 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
     if (miniGameType === "pacman") return <PacManController team={team} socket={socket} sessionId={sessionId} playerName={playerName} />;
     if (miniGameType === "number_survival") return <NumberSurvivalController {...commonProps} mySocketId={mySocketId} />;
     if (miniGameType === "face_merge") return <FaceMergeController {...commonProps} />;
-    if (miniGameType === "mystery_puzzle") return <MysteryPuzzleController {...commonProps} />;
+    if (miniGameType === "mystery_puzzle") return <MysteryPuzzleController {...commonProps} mySocketId={mySocketId} />;
   }
 
   if (status === "finished") {

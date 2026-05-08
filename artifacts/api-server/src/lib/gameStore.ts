@@ -22,19 +22,36 @@ export interface NumberSurvivalState {
   roundSelections: Map<string, number>; survivors: Set<string>; history: RoundResult[];
 }
 
-export interface FaceMergeState {
-  phase: "setup" | "guessing" | "revealed";
-  image1: string | null;
-  image2: string | null;
+export interface FaceMergeSet {
+  image1: string;
+  image2: string;
   merged: string | null;
 }
 
+export interface FaceMergeState {
+  phase: "guessing" | "revealed" | "done";
+  sets: FaceMergeSet[];
+  currentSetIndex: number;
+}
+
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
+
+export interface MysteryPuzzleAttempt {
+  code: string;
+  correct: boolean;
+  timestamp: number;
+  playerName: string;
+  teamId: string;
+}
 
 export interface MysteryPuzzleState {
   story: string; clues: MysteryPuzzleClue[];
   currentClueIndex: number; revealedClues: number[];
   vaultCode: string; vaultRevealed: boolean;
+  solverByTeam: Record<string, string>;          // teamId -> solver socketId
+  solverNamesByTeam: Record<string, string>;     // teamId -> solver display name
+  attempts: MysteryPuzzleAttempt[];
+  winnerTeamId: string | null;
 }
 
 export interface GameSession {
@@ -247,16 +264,16 @@ class GameStore {
     const s = this.sessions.get(sessionId);
     if (!s) return false;
     s.miniGameType = "face_merge";
-    s.faceMergeState = { phase: "setup", image1: null, image2: null, merged: null };
+    s.faceMergeState = { phase: "guessing", sets: [], currentSetIndex: 0 };
     return true;
   }
 
-  setFaceMergeImages(sessionId: string, image1: string, image2: string, merged?: string | null): boolean {
+  setFaceMergeSets(sessionId: string, sets: FaceMergeSet[]): boolean {
     const s = this.sessions.get(sessionId);
     if (!s || !s.faceMergeState) return false;
-    s.faceMergeState.image1 = image1;
-    s.faceMergeState.image2 = image2;
-    s.faceMergeState.merged = merged ?? null;
+    if (sets.length === 0) return false;
+    s.faceMergeState.sets = sets;
+    s.faceMergeState.currentSetIndex = 0;
     s.faceMergeState.phase = "guessing";
     s.buzzedBy = null;
     for (const p of s.players.values()) p.hasBuzzed = false;
@@ -270,15 +287,73 @@ class GameStore {
     return true;
   }
 
+  faceMergeNext(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.faceMergeState) return false;
+    const fm = s.faceMergeState;
+    if (fm.currentSetIndex + 1 >= fm.sets.length) {
+      fm.phase = "done";
+      return true;
+    }
+    fm.currentSetIndex += 1;
+    fm.phase = "guessing";
+    s.buzzedBy = null;
+    for (const p of s.players.values()) p.hasBuzzed = false;
+    return true;
+  }
+
   initMysteryPuzzle(sessionId: string, story: string, clues: MysteryPuzzleClue[]): boolean {
     const s = this.sessions.get(sessionId);
     if (!s) return false;
     s.miniGameType = "mystery_puzzle";
+
+    // Pick a random solver per team from currently joined players
+    const solverByTeam: Record<string, string> = {};
+    const solverNamesByTeam: Record<string, string> = {};
+    for (const team of s.teams) {
+      const teamPlayers: { sid: string; name: string }[] = [];
+      for (const [sid, p] of s.players) {
+        if (p.teamId === team.id) teamPlayers.push({ sid, name: p.name });
+      }
+      if (teamPlayers.length > 0) {
+        const pick = teamPlayers[Math.floor(Math.random() * teamPlayers.length)];
+        solverByTeam[team.id] = pick.sid;
+        solverNamesByTeam[team.id] = pick.name;
+      }
+    }
+
     s.mysteryPuzzleState = {
       story, clues, currentClueIndex: -1, revealedClues: [],
-      vaultCode: clues.map((c) => c.reward).join(""), vaultRevealed: false,
+      vaultCode: clues.map((c) => c.reward).join(""),
+      vaultRevealed: false,
+      solverByTeam, solverNamesByTeam,
+      attempts: [],
+      winnerTeamId: null,
     };
     return true;
+  }
+
+  submitMysteryCode(sessionId: string, socketId: string, code: string): { ok: boolean; correct: boolean; reason?: string; teamId?: string; playerName?: string } {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.mysteryPuzzleState) return { ok: false, correct: false, reason: "No active puzzle" };
+    const mp = s.mysteryPuzzleState;
+    if (mp.winnerTeamId) return { ok: false, correct: false, reason: "Already solved" };
+    const player = s.players.get(socketId);
+    if (!player) return { ok: false, correct: false, reason: "Not joined" };
+    if (mp.solverByTeam[player.teamId] !== socketId) {
+      return { ok: false, correct: false, reason: "Only the chosen solver can submit" };
+    }
+    const trimmed = code.trim();
+    const correct = trimmed === mp.vaultCode;
+    mp.attempts.push({
+      code: trimmed, correct, timestamp: Date.now(),
+      playerName: player.name, teamId: player.teamId,
+    });
+    if (correct) {
+      mp.winnerTeamId = player.teamId;
+      mp.vaultRevealed = true;
+    }
+    return { ok: true, correct, teamId: player.teamId, playerName: player.name };
   }
 
   showMysteryClue(sessionId: string, clueIndex: number): boolean {
@@ -391,13 +466,24 @@ class GameStore {
       };
     } else if (s.miniGameType === "face_merge" && s.faceMergeState) {
       const fm = s.faceMergeState;
-      miniGameData = { type: "face_merge", phase: fm.phase, image1: fm.image1, image2: fm.image2, merged: fm.merged };
+      const cur = fm.sets[fm.currentSetIndex] ?? null;
+      miniGameData = {
+        type: "face_merge",
+        phase: fm.phase,
+        setIndex: fm.currentSetIndex,
+        totalSets: fm.sets.length,
+        image1: cur?.image1 ?? null,
+        image2: cur?.image2 ?? null,
+        merged: cur?.merged ?? null,
+      };
     } else if (s.miniGameType === "mystery_puzzle" && s.mysteryPuzzleState) {
       const mp = s.mysteryPuzzleState;
       miniGameData = {
         type: "mystery_puzzle", story: mp.story, clues: mp.clues,
         currentClueIndex: mp.currentClueIndex, revealedClues: mp.revealedClues,
         vaultCode: mp.vaultCode, vaultRevealed: mp.vaultRevealed,
+        solverByTeam: mp.solverByTeam, solverNamesByTeam: mp.solverNamesByTeam,
+        attempts: mp.attempts, winnerTeamId: mp.winnerTeamId,
       };
     } else if (s.miniGameType === "pacman") {
       miniGameData = { type: "pacman" };

@@ -142,9 +142,12 @@ export default function SpectatorView() {
         {/* MINI-GAME RENDERINGS */}
         {isMiniGame && miniGameType === "face_merge" && fmData && (
           <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-pink-700">
-            <h2 className="text-xl font-black text-pink-400 text-center mb-5">🖼️ Face Merge</h2>
-            {fmData.phase === "setup" && (
-              <p className="text-center text-gray-400">Admin is setting up the merged image…</p>
+            <h2 className="text-xl font-black text-pink-400 text-center mb-1">🖼️ Face Merge</h2>
+            {fmData.totalSets > 0 && fmData.phase !== "done" && (
+              <p className="text-center text-xs text-pink-300 mb-4">Image {fmData.setIndex + 1} of {fmData.totalSets}</p>
+            )}
+            {fmData.phase === "done" && (
+              <p className="text-center text-pink-300 font-bold">All images complete! 🎉</p>
             )}
             {fmData.phase === "guessing" && (
               <div className="flex justify-center">
@@ -236,26 +239,84 @@ export default function SpectatorView() {
         {isMiniGame && miniGameType === "mystery_puzzle" && mpData && (
           <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-amber-700">
             <h2 className="text-xl font-black text-amber-400 text-center mb-3">🔐 Mystery Puzzle</h2>
-            {mpData.story && (
-              <p className="text-gray-300 text-sm italic text-center mb-4 px-2">"{mpData.story}"</p>
-            )}
-            <div className="space-y-2">
-              {mpData.clues.map((clue, i) => {
-                const revealed = mpData.revealedClues.includes(i);
-                const isCurrent = i === mpData.currentClueIndex;
+
+            {/* 2 decorative locks + vault code display */}
+            <div className="flex items-center justify-center gap-6 mb-4">
+              <div className="text-6xl">{mpData.vaultRevealed ? "🔓" : "🔒"}</div>
+              <div className="text-center">
+                <p className="text-xs text-amber-400 font-bold uppercase">Vault</p>
+                <p className="font-mono text-3xl font-black text-amber-300 tracking-widest">
+                  {mpData.vaultRevealed ? mpData.vaultCode : "????"}
+                </p>
+              </div>
+              <div className="text-6xl">{mpData.vaultRevealed ? "🔓" : "🔒"}</div>
+            </div>
+
+            {/* Winner banner */}
+            {mpData.winnerTeamId && (() => {
+              const winner = teams.find((t) => t.id === mpData.winnerTeamId);
+              return winner ? (
+                <div className="bg-green-900 border-2 border-green-500 rounded-xl p-3 text-center mb-4 animate-pulse">
+                  <p className="text-green-300 text-xs font-bold">VAULT CRACKED!</p>
+                  <p className="text-2xl font-black text-white">🏆 {winner.name} wins</p>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Solvers per team */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {teams.map((team) => {
+                const solverName = mpData.solverNamesByTeam?.[team.id];
+                const colors = getTeamColors(team.color);
                 return (
-                  <div key={i} className={`rounded-lg p-3 border ${isCurrent ? "border-amber-500 bg-amber-950/30" : revealed ? "border-green-700 bg-green-950/30" : "border-gray-700 bg-gray-800/50"}`}>
-                    <p className="text-xs text-gray-500 mb-1">Clue {i + 1}{revealed ? " ✓" : isCurrent ? " — current" : ""}</p>
-                    <p className="text-sm text-white">{clue.question}</p>
-                    {revealed && <p className="text-xs text-green-300 mt-1">→ Answer: {clue.answer}</p>}
+                  <div key={team.id} className={`rounded-lg p-2 border ${colors.border} bg-gray-800`}>
+                    <p className={`text-xs font-bold ${colors.text}`}>{team.name}</p>
+                    <p className="text-white text-sm font-bold mt-0.5 truncate">
+                      {solverName ? <>🔑 {solverName}</> : <span className="text-gray-500">No solver</span>}
+                    </p>
                   </div>
                 );
               })}
             </div>
-            {mpData.vaultRevealed && (
-              <div className="mt-4 bg-amber-950 border-2 border-amber-500 rounded-xl p-4 text-center">
-                <p className="text-amber-400 text-xs font-bold mb-1">VAULT CODE</p>
-                <p className="text-3xl font-black text-amber-300 font-mono tracking-widest">{mpData.vaultCode}</p>
+
+            {mpData.story && (
+              <p className="text-gray-300 text-sm italic text-center mb-4 px-2">"{mpData.story}"</p>
+            )}
+
+            {/* Revealed clues */}
+            <div className="space-y-2 mb-3">
+              {mpData.clues.map((clue, i) => {
+                const revealed = mpData.revealedClues.includes(i);
+                return (
+                  <div key={i} className={`rounded-lg p-3 border ${revealed ? "border-amber-500 bg-amber-950/30" : "border-gray-700 bg-gray-800/50"}`}>
+                    <p className="text-xs text-gray-500 mb-1">Clue {i + 1} → digit {i + 1}{revealed ? "" : " (not revealed)"}</p>
+                    <p className={`text-sm ${revealed ? "text-white font-semibold" : "text-gray-600 italic"}`}>
+                      {revealed ? clue.question : "—"}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Recent attempts */}
+            {mpData.attempts && mpData.attempts.length > 0 && (
+              <div className="bg-gray-800/50 rounded-lg p-2 mt-3">
+                <p className="text-xs text-amber-400 font-bold uppercase mb-1">Recent attempts</p>
+                <div className="space-y-1 max-h-24 overflow-y-auto">
+                  {[...mpData.attempts].slice(-5).reverse().map((a, i) => {
+                    const team = teams.find((t) => t.id === a.teamId);
+                    const colors = team ? getTeamColors(team.color) : null;
+                    return (
+                      <div key={i} className="flex items-center justify-between text-xs">
+                        <span className={colors?.text || "text-gray-400"}>{a.playerName} ({team?.name})</span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-white">{a.code}</span>
+                          <span className={a.correct ? "text-green-400" : "text-red-400"}>{a.correct ? "✓" : "✗"}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

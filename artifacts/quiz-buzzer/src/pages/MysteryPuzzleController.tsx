@@ -9,45 +9,100 @@ interface Props {
   playerName: string;
   avatar: string;
   gameState: GameState;
+  mySocketId?: string;
 }
 
 const TEAM_BG: Record<string, string> = { blue: "#1e3a8a", red: "#7f1d1d", green: "#14532d", yellow: "#713f12", purple: "#4a1d96", orange: "#7c2d12" };
 const TEAM_FG: Record<string, string> = { blue: "#60a5fa", red: "#f87171", green: "#4ade80", yellow: "#facc15", purple: "#c084fc", orange: "#fb923c" };
-const CLUE_ICONS = ["🧩", "🔤", "🔢", "🧠", "🎯", "💡"];
 
-export default function MysteryPuzzleController({ team, socket, sessionId, playerName, avatar, gameState: initialState }: Props) {
+export default function MysteryPuzzleController({ team, socket, sessionId, playerName, avatar, gameState: initialState, mySocketId }: Props) {
   const [gameState, setGameState] = useState<GameState>(initialState);
-  const [answer, setAnswer] = useState("");
-  const [submitted, setSubmitted] = useState<Record<number, string>>({});
+  const [code, setCode] = useState<string[]>(["", "", "", ""]);
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<"idle" | "correct" | "wrong">("idle");
+  const [shake, setShake] = useState(false);
 
   const teamBg = TEAM_BG[team.color] || "#1f2937";
   const teamFg = TEAM_FG[team.color] || "#ffffff";
 
   useEffect(() => {
-    const handler = (state: GameState) => {
-      setGameState(state);
-      setAnswer("");
-    };
+    const handler = (state: GameState) => setGameState(state);
     socket.on("game:mystery_updated", handler);
     socket.on("game:minigame_ended", handler);
+    socket.on("game:score_update", handler);
     return () => {
       socket.off("game:mystery_updated", handler);
       socket.off("game:minigame_ended", handler);
+      socket.off("game:score_update", handler);
     };
   }, [socket]);
 
   const mpData = gameState.miniGameData as MysteryPuzzleData | null;
   if (!mpData) return null;
 
-  const currentClue = mpData.currentClueIndex >= 0 ? mpData.clues[mpData.currentClueIndex] : null;
-  const alreadySubmitted = mpData.currentClueIndex >= 0 ? submitted[mpData.currentClueIndex] : null;
+  const mySolverSocketId = mySocketId ?? socket.id;
+  const isSolver = mpData.solverByTeam[team.id] === mySolverSocketId;
+  const solverName = mpData.solverNamesByTeam[team.id];
+  const winnerTeam = mpData.winnerTeamId ? gameState.teams.find((t) => t.id === mpData.winnerTeamId) : null;
+  const myTeamWon = winnerTeam?.id === team.id;
+  const someoneElseWon = !!winnerTeam && !myTeamWon;
+
+  const setDigit = (i: number, value: string) => {
+    const v = value.replace(/\D/g, "").slice(0, 1);
+    setCode((prev) => prev.map((d, idx) => idx === i ? v : d));
+    setFeedback("idle");
+    if (v && i < 3) {
+      const next = document.getElementById(`code-digit-${i + 1}`);
+      next?.focus();
+    }
+  };
+
+  const handleKeypadPress = (digit: string) => {
+    setFeedback("idle");
+    setCode((prev) => {
+      const next = [...prev];
+      const firstEmpty = next.findIndex((d) => d === "");
+      const target = firstEmpty === -1 ? 3 : firstEmpty;
+      next[target] = digit;
+      return next;
+    });
+  };
+
+  const handleBackspace = () => {
+    setFeedback("idle");
+    setCode((prev) => {
+      const next = [...prev];
+      const lastFilled = [...next].reverse().findIndex((d) => d !== "");
+      if (lastFilled === -1) return prev;
+      const target = next.length - 1 - lastFilled;
+      next[target] = "";
+      return next;
+    });
+  };
 
   const handleSubmit = () => {
-    if (!answer.trim() || mpData.currentClueIndex < 0) return;
-    socket.emit("mystery:answer", { sessionId, answer: answer.trim(), clueIndex: mpData.currentClueIndex });
-    setSubmitted((prev) => ({ ...prev, [mpData.currentClueIndex]: answer.trim() }));
-    setAnswer("");
+    const joined = code.join("");
+    if (joined.length !== 4) return;
+    setSubmitting(true);
+    socket.emit("mystery:submit_code", { sessionId, code: joined }, (res: { ok: boolean; correct: boolean; reason?: string }) => {
+      setSubmitting(false);
+      if (res?.correct) {
+        setFeedback("correct");
+      } else {
+        setFeedback("wrong");
+        setShake(true);
+        setTimeout(() => setShake(false), 500);
+      }
+    });
   };
+
+  // Auto-submit when 4 digits are filled
+  useEffect(() => {
+    if (code.every((d) => /^[0-9]$/.test(d)) && feedback === "idle" && !submitting && !winnerTeam && isSolver) {
+      handleSubmit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code]);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: teamBg }}>
@@ -73,84 +128,153 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
       </div>
 
       <div className="flex-1 flex flex-col px-4 pb-8 pt-4 gap-4">
-        <div className="bg-black/30 rounded-xl p-4">
-          <p className="text-xs font-bold uppercase mb-1" style={{ color: teamFg }}>📖 Story</p>
-          <p className="text-white/80 text-sm leading-relaxed">{mpData.story}</p>
+
+        {/* 2 decorative locks */}
+        <div className="flex items-center justify-center gap-6">
+          <div className="text-5xl">{winnerTeam ? "🔓" : "🔒"}</div>
+          <div className="text-center text-yellow-400 font-bold text-sm">VAULT</div>
+          <div className="text-5xl">{winnerTeam ? "🔓" : "🔒"}</div>
         </div>
 
+        {/* Story */}
+        {mpData.story && (
+          <div className="bg-black/30 rounded-xl p-3">
+            <p className="text-xs text-white/40 font-bold uppercase mb-1">📖 Story</p>
+            <p className="text-white/80 text-sm leading-relaxed">{mpData.story}</p>
+          </div>
+        )}
+
+        {/* Revealed clues so far */}
         {mpData.revealedClues.length > 0 && (
           <div className="bg-black/20 rounded-xl p-3">
-            <p className="text-xs font-bold uppercase mb-2 text-yellow-400">🔐 Code So Far</p>
-            <div className="flex gap-1 flex-wrap">
-              {mpData.clues.map((clue, i) => (
-                <span key={i} className={`w-9 h-9 rounded-lg flex items-center justify-center font-black text-base border ${mpData.revealedClues.includes(i) ? "border-yellow-400 text-yellow-300 bg-yellow-950/60" : "border-white/10 text-white/20 bg-white/5"}`}>
-                  {mpData.revealedClues.includes(i) ? clue.reward : "?"}
-                </span>
-              ))}
+            <p className="text-xs font-bold uppercase mb-2 text-yellow-400">🧩 Clues Revealed</p>
+            <div className="space-y-1.5">
+              {mpData.clues.map((clue, i) => {
+                if (!mpData.revealedClues.includes(i)) return null;
+                return (
+                  <div key={i} className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[11px] text-white/40">Clue {i + 1}</p>
+                    <p className="text-white text-sm font-semibold">{clue.question}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {mpData.vaultRevealed && (
-          <div className="bg-yellow-900/40 border-2 border-yellow-400 rounded-xl p-4 text-center animate-pulse">
-            <p className="text-yellow-400 font-black text-lg">🎉 VAULT CRACKED!</p>
-            <p className="text-4xl font-black text-white mt-1">{mpData.vaultCode}</p>
+        {mpData.revealedClues.length === 0 && (
+          <div className="text-center text-white/40 text-sm py-2 italic">
+            Waiting for the host to reveal the first clue…
           </div>
         )}
 
-        {mpData.currentClueIndex === -1 && (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-white/40 text-lg text-center animate-pulse">Waiting for first clue…</p>
+        {/* WINNER — game over banner */}
+        {winnerTeam && (
+          <div className={`rounded-xl p-4 text-center ${myTeamWon ? "bg-green-900 border-2 border-green-400" : "bg-red-900/40 border-2 border-red-700"}`}>
+            <p className="text-2xl font-black text-white mb-1">{myTeamWon ? "🏆 YOUR TEAM WINS!" : "💔 Other team won"}</p>
+            <p className="text-sm text-white/70">Code was <span className="font-mono font-black text-yellow-300">{mpData.vaultCode}</span></p>
           </div>
         )}
 
-        {currentClue && (
-          <div className="bg-black/30 rounded-xl p-4 space-y-3 flex-1">
-            <p className="font-bold text-sm" style={{ color: teamFg }}>
-              {CLUE_ICONS[mpData.currentClueIndex]} Clue {mpData.currentClueIndex + 1}
-            </p>
-            <p className="text-white font-bold text-lg leading-snug">{currentClue.question}</p>
-
-            {mpData.revealedClues.includes(mpData.currentClueIndex) && (
-              <div className="bg-green-900/40 border border-green-500 rounded-lg p-3">
-                <p className="text-green-400 text-xs font-bold mb-1">Answer Revealed!</p>
-                <p className="text-green-300 font-black text-xl">{currentClue.answer}</p>
-                {currentClue.reward && <p className="text-yellow-400 text-sm mt-1">Code digit: <strong>{currentClue.reward}</strong></p>}
-              </div>
-            )}
-
-            {!mpData.revealedClues.includes(mpData.currentClueIndex) && (
-              <div className="space-y-2">
-                {alreadySubmitted ? (
-                  <div className="bg-white/10 rounded-lg p-3 text-center">
-                    <p className="text-white/60 text-sm">Your answer: <span className="text-white font-bold">{alreadySubmitted}</span></p>
-                    <p className="text-white/40 text-xs mt-1">Waiting for host to reveal…</p>
-                  </div>
-                ) : (
+        {/* Body: keypad for solver, otherwise waiting message */}
+        {!winnerTeam && (
+          <>
+            {!isSolver ? (
+              <div className="bg-black/30 rounded-xl p-6 text-center flex-1 flex flex-col items-center justify-center">
+                <div className="text-5xl mb-3">🔑</div>
+                {solverName ? (
                   <>
-                    <input
-                      className="w-full rounded-xl px-4 py-3 text-black font-bold text-lg focus:outline-none"
-                      style={{ backgroundColor: "rgba(255,255,255,0.9)" }}
-                      placeholder="Type your answer…"
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                    />
-                    <button
-                      onClick={handleSubmit}
-                      disabled={!answer.trim()}
-                      className="w-full py-3 rounded-xl font-black text-lg transition disabled:opacity-40"
-                      style={{ backgroundColor: teamFg, color: teamBg }}
-                    >
-                      Submit Answer →
-                    </button>
+                    <p className="text-white font-bold text-lg">{solverName}</p>
+                    <p className="text-white/60 text-sm mt-1">is unlocking the vault for {team.name}</p>
+                    <p className="text-white/40 text-xs mt-3">Help your teammate solve the clues — they'll enter the code on their phone</p>
                   </>
+                ) : (
+                  <p className="text-white/60 text-sm">No solver chosen for this team</p>
                 )}
               </div>
+            ) : (
+              <div className={`bg-black/30 rounded-xl p-4 space-y-4 ${shake ? "animate-shake" : ""}`}>
+                <p className="text-center text-yellow-300 font-black text-sm uppercase">🔑 You are the solver</p>
+
+                {/* 4-digit display */}
+                <div className="flex justify-center gap-2">
+                  {code.map((d, i) => (
+                    <input
+                      key={i}
+                      id={`code-digit-${i}`}
+                      inputMode="numeric"
+                      type="text"
+                      maxLength={1}
+                      value={d}
+                      onChange={(e) => setDigit(i, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Backspace" && !code[i] && i > 0) {
+                          const prev = document.getElementById(`code-digit-${i - 1}`);
+                          prev?.focus();
+                        }
+                      }}
+                      className={`w-14 h-16 text-center font-mono font-black text-3xl rounded-lg border-2 ${
+                        feedback === "wrong" ? "border-red-500 bg-red-900/40 text-red-200" :
+                        feedback === "correct" ? "border-green-500 bg-green-900/40 text-green-200" :
+                        d ? "border-yellow-400 bg-yellow-950/40 text-yellow-200" : "border-white/20 bg-white/5 text-white/40"
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {feedback === "wrong" && <p className="text-center text-red-300 text-sm font-bold">Wrong code — try again</p>}
+                {feedback === "correct" && <p className="text-center text-green-300 text-sm font-bold">✓ Correct!</p>}
+
+                {/* On-screen keypad */}
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {["1","2","3","4","5","6","7","8","9"].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => handleKeypadPress(n)}
+                      disabled={submitting}
+                      className="bg-white/10 hover:bg-white/20 active:scale-95 text-white font-black text-2xl py-3 rounded-xl transition disabled:opacity-50"
+                    >
+                      {n}
+                    </button>
+                  ))}
+                  <button onClick={handleBackspace} disabled={submitting} className="bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold py-3 rounded-xl transition disabled:opacity-50">⌫</button>
+                  <button
+                    onClick={() => handleKeypadPress("0")}
+                    disabled={submitting}
+                    className="bg-white/10 hover:bg-white/20 active:scale-95 text-white font-black text-2xl py-3 rounded-xl transition disabled:opacity-50"
+                  >
+                    0
+                  </button>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting || code.some((d) => !d)}
+                    className="bg-green-600 hover:bg-green-500 active:scale-95 text-white font-black py-3 rounded-xl transition disabled:opacity-30"
+                  >
+                    {submitting ? "..." : "✓"}
+                  </button>
+                </div>
+              </div>
             )}
+          </>
+        )}
+
+        {/* Attempt count */}
+        {!winnerTeam && mpData.attempts.length > 0 && (
+          <div className="text-center text-white/30 text-xs">
+            {mpData.attempts.length} attempt{mpData.attempts.length === 1 ? "" : "s"} so far
           </div>
         )}
       </div>
+
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-6px); }
+          50% { transform: translateX(6px); }
+          75% { transform: translateX(-3px); }
+        }
+        .animate-shake { animation: shake 0.4s; }
+      `}</style>
     </div>
   );
 }

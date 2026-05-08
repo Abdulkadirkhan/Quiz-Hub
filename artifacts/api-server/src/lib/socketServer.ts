@@ -212,8 +212,21 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       else io.to(`session:${data.sessionId}`).emit("game:number_done", state);
     });
 
-    socket.on("admin:face_merge_setup", (data: { sessionId: string; image1: string; image2: string; merged?: string | null }) => {
-      const ok = gameStore.setFaceMergeImages(data.sessionId, data.image1, data.image2, data.merged ?? null);
+    socket.on("admin:face_merge_setup", (data: { sessionId: string; sets: Array<{ image1: string; image2: string; merged?: string | null }> }) => {
+      if (!Array.isArray(data.sets) || data.sets.length === 0) return;
+      const cleanSets = data.sets.map((s) => ({
+        image1: s.image1,
+        image2: s.image2,
+        merged: s.merged ?? null,
+      }));
+      const ok = gameStore.setFaceMergeSets(data.sessionId, cleanSets);
+      if (!ok) return;
+      const state = gameStore.getPublicState(data.sessionId);
+      io.to(`session:${data.sessionId}`).emit("game:face_merge_updated", state);
+    });
+
+    socket.on("admin:face_merge_next", (data: { sessionId: string }) => {
+      const ok = gameStore.faceMergeNext(data.sessionId);
       if (!ok) return;
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:face_merge_updated", state);
@@ -272,6 +285,19 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
         socketId: socket.id, name: player.name, teamId: player.teamId, avatar: player.avatar,
         answer: data.answer, clueIndex: data.clueIndex,
       });
+    });
+
+    socket.on("mystery:submit_code", (data: { sessionId: string; code: string }, ack?: (res: { ok: boolean; correct: boolean; reason?: string }) => void) => {
+      const result = gameStore.submitMysteryCode(data.sessionId, socket.id, data.code);
+      if (ack) ack({ ok: result.ok, correct: result.correct, reason: result.reason });
+      if (!result.ok) return;
+      const state = gameStore.getPublicState(data.sessionId);
+      io.to(`session:${data.sessionId}`).emit("game:mystery_updated", state);
+      if (result.correct && result.teamId) {
+        gameStore.awardPoint(data.sessionId, result.teamId);
+        const after = gameStore.getPublicState(data.sessionId);
+        io.to(`session:${data.sessionId}`).emit("game:score_update", after);
+      }
     });
 
     socket.on("disconnect", () => {

@@ -22,13 +22,23 @@ export interface NumberSurvivalData {
 
 export interface FaceMergeData {
   type: "face_merge";
-  phase: "setup" | "guessing" | "revealed";
+  phase: "guessing" | "revealed" | "done";
+  setIndex: number;
+  totalSets: number;
   image1: string | null;
   image2: string | null;
   merged: string | null;
 }
 
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
+
+export interface MysteryPuzzleAttempt {
+  code: string;
+  correct: boolean;
+  timestamp: number;
+  playerName: string;
+  teamId: string;
+}
 
 export interface MysteryPuzzleData {
   type: "mystery_puzzle";
@@ -38,6 +48,10 @@ export interface MysteryPuzzleData {
   revealedClues: number[];
   vaultCode: string;
   vaultRevealed: boolean;
+  solverByTeam: Record<string, string>;
+  solverNamesByTeam: Record<string, string>;
+  attempts: MysteryPuzzleAttempt[];
+  winnerTeamId: string | null;
 }
 
 export interface PacmanData { type: "pacman"; }
