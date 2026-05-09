@@ -73,13 +73,46 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
   if (!data) return null;
   const { round, totalRounds, phase, currentResult } = data;
 
+  // ===== END OF MINI-GAME =====
+  // Team-aware result takes precedence over personal elimination state.
+  if (phase === "done") {
+    const teamCounts = localState.teams.map((t) => ({ id: t.id, name: t.name, count: (data.teamSurvivors[t.id] || []).length }));
+    teamCounts.sort((a, b) => b.count - a.count);
+    const top = teamCounts[0];
+    const tied = teamCounts.length > 1 && top.count === teamCounts[1].count;
+    const myTeamWon = !tied && top.id === team.id;
+    const myTeamCount = data.teamSurvivors[team.id]?.length ?? 0;
+
+    let icon = "🏆"; let title = "Round Won!"; let titleColor = "#4ade80";
+    if (tied) { icon = "🤝"; title = "It's a tie!"; titleColor = "#facc15"; }
+    else if (!myTeamWon) { icon = "💔"; title = "Round Lost"; titleColor = "#f87171"; }
+
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center" style={{ backgroundColor: teamBg }}>
+        <div className="text-6xl mb-3">{icon}</div>
+        <h2 className="text-4xl font-black mb-3" style={{ color: titleColor }}>{title}</h2>
+        <p className="text-white/70">Survivors per team:</p>
+        <div className="flex gap-3 mt-3">
+          {teamCounts.map((tc) => (
+            <div key={tc.id} className={`px-4 py-2 rounded-xl ${tc.id === team.id ? "border-2 border-white/30" : ""}`} style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
+              <div className="text-2xl font-black text-white">{tc.count}</div>
+              <div className="text-xs text-white/50">{tc.name}</div>
+            </div>
+          ))}
+        </div>
+        <p className="text-white/40 text-sm mt-6 animate-pulse">Waiting for host to continue…</p>
+      </div>
+    );
+  }
+
+  // ===== PERSONAL ELIMINATION (mid-game) =====
   if (!isAlive) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center" style={{ backgroundColor: teamBg }}>
         <div className="text-6xl mb-4">💀</div>
-        <h2 className="text-3xl font-black text-white mb-2">Eliminated!</h2>
-        <p className="text-white/60 text-lg">You picked the same number as someone else.</p>
-        <p className="text-white/40 text-sm mt-4">Watch the main screen for results.</p>
+        <h2 className="text-3xl font-black text-white mb-2">You're out this round</h2>
+        <p className="text-white/60 text-lg">Your number clashed with the other team's pick.</p>
+        <p className="text-white/40 text-sm mt-4">But your team can still win — cheer them on!</p>
         {currentResult && (
           <div className="mt-6 bg-black/30 rounded-2xl p-4 w-full max-w-xs">
             <p className="text-white/60 text-xs mb-2">ROUND {currentResult.round} RESULTS</p>
@@ -100,6 +133,7 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
     );
   }
 
+  // ===== ROUND REVEAL =====
   if (phase === "revealing" && currentResult) {
     const myEntry = currentResult.choices.find((c) => c.socketId === mySocketId);
     const iEliminated = currentResult.eliminated.includes(mySocketId);
@@ -109,14 +143,14 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
         {iEliminated ? (
           <>
             <div className="text-6xl mb-3">💀</div>
-            <h2 className="text-3xl font-black text-red-400 mb-2">Eliminated!</h2>
-            <p className="text-white/60">Your number {myEntry?.number} was picked by someone else.</p>
+            <h2 className="text-3xl font-black text-red-400 mb-2">You're out this round</h2>
+            <p className="text-white/60">Your number {myEntry?.number} clashed with the other team.</p>
           </>
         ) : (
           <>
             <div className="text-6xl mb-3">✅</div>
             <h2 className="text-3xl font-black text-green-400 mb-2">You Survived!</h2>
-            <p className="text-white/60">Your number {myEntry?.number} was unique!</p>
+            <p className="text-white/60">Your number {myEntry?.number} is safe.</p>
           </>
         )}
         <p className="text-white/40 text-sm mt-4 animate-pulse">Waiting for next round…</p>
@@ -137,16 +171,7 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
     );
   }
 
-  if (phase === "done") {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center" style={{ backgroundColor: teamBg }}>
-        <div className="text-6xl mb-4">🏆</div>
-        <h2 className="text-3xl font-black text-yellow-400 mb-2">Game Over!</h2>
-        <p className="text-white/60">Waiting for admin to announce winner…</p>
-      </div>
-    );
-  }
-
+  // ===== NUMBER PICKER =====
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ backgroundColor: teamBg }}>
       <div className="text-center mb-4">
@@ -154,40 +179,39 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
         <p className="text-sm font-bold" style={{ color: teamFg }}>{playerName} — {team.name}</p>
         <div className="mt-2">
           <span className="text-xs text-white/40">Round </span>
-          <span className="text-white font-black">{round}</span>
+          <span className="text-xl font-black text-white">{round}</span>
           <span className="text-white/40 text-xs"> of {totalRounds}</span>
         </div>
       </div>
 
-      <div className="bg-black/30 rounded-2xl p-5 w-full max-w-sm">
-        <h2 className="text-white font-black text-xl text-center mb-1">Pick a number</h2>
-        <p className="text-white/50 text-sm text-center mb-4">
-          Unique numbers survive. Duplicates are eliminated!
-        </p>
+      <p className="text-center text-white/60 text-sm mb-3 max-w-xs">
+        Pick a number. If <span className="text-yellow-400 font-bold">a player on the OTHER team picks the same number</span>, you both get out. Same-team duplicates are safe.
+      </p>
 
-        {submitted ? (
-          <div className="text-center">
-            <div className="text-6xl font-black mb-3" style={{ color: teamFg }}>{selected}</div>
-            <p className="text-white/60 animate-pulse">Locked in! Waiting for others…</p>
-            {myChoiceThisRound !== null && myChoiceThisRound !== selected && (
-              <p className="text-xs text-white/30 mt-1">Server confirmed: {myChoiceThisRound}</p>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-5 gap-2">
-            {[1,2,3,4,5,6,7,8,9,10].map((num) => (
-              <button
-                key={num}
-                onClick={() => submitNumber(num)}
-                className="aspect-square rounded-xl font-black text-2xl transition-all active:scale-95 select-none"
-                style={{ backgroundColor: teamFg + "22", color: teamFg, border: `2px solid ${teamFg}44` }}
-              >
-                {num}
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="grid grid-cols-5 gap-2 max-w-xs">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+          <button
+            key={n}
+            onClick={() => submitNumber(n)}
+            disabled={submitted}
+            className={`aspect-square rounded-xl text-2xl font-black transition-all active:scale-95 ${
+              selected === n ? "bg-yellow-400 text-black" : submitted ? "bg-black/30 text-white/30" : "bg-white/10 text-white hover:bg-white/20"
+            }`}
+          >
+            {n}
+          </button>
+        ))}
       </div>
+
+      {submitted && (
+        <div className="text-center mt-4">
+          <p className="text-white font-bold">Picked {selected}!</p>
+          {myChoiceThisRound !== null && myChoiceThisRound !== selected && (
+            <p className="text-xs text-white/30 mt-1">Server confirmed: {myChoiceThisRound}</p>
+          )}
+          <p className="text-white/50 text-sm mt-1 animate-pulse">Waiting for everyone…</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,37 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     path: "/api/socket.io",
   });
 
+  // Per-session Pac-Man tick loops
+  const pacmanLoops = new Map<string, NodeJS.Timeout>();
+  const startPacmanLoop = (sessionId: string) => {
+    stopPacmanLoop(sessionId);
+    const tick = () => {
+      const session = gameStore.getSession(sessionId);
+      if (!session || session.miniGameType !== "pacman" || !session.pacmanState) {
+        stopPacmanLoop(sessionId);
+        return;
+      }
+      gameStore.pacmanTick(sessionId);
+      const state = gameStore.getPublicState(sessionId);
+      io.to(`session:${sessionId}`).emit("game:pacman_tick", state);
+      if (session.pacmanState.ended) {
+        stopPacmanLoop(sessionId);
+        const result = gameStore.pacmanFinish(sessionId);
+        const finalState = gameStore.getPublicState(sessionId);
+        io.to(`session:${sessionId}`).emit("game:pacman_finished", { state: finalState, result });
+      }
+    };
+    const id = setInterval(tick, 180);
+    pacmanLoops.set(sessionId, id);
+  };
+  const stopPacmanLoop = (sessionId: string) => {
+    const existing = pacmanLoops.get(sessionId);
+    if (existing) {
+      clearInterval(existing);
+      pacmanLoops.delete(sessionId);
+    }
+  };
+
   io.on("connection", (socket: Socket) => {
     logger.info({ socketId: socket.id }, "Socket connected");
 
@@ -60,6 +91,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     });
 
     socket.on("admin:reset_round", (data: { sessionId: string }) => {
+      stopPacmanLoop(data.sessionId);
       const ok = gameStore.resetRound(data.sessionId);
       if (!ok) return;
       const state = gameStore.getPublicState(data.sessionId);
@@ -73,6 +105,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     });
 
     socket.on("admin:end_game", (data: { sessionId: string }) => {
+      stopPacmanLoop(data.sessionId);
       gameStore.endGame(data.sessionId);
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:finished", state);
@@ -102,18 +135,31 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       io.to(`session:${data.sessionId}`).emit("game:buzzer_closed", state);
     });
 
-    socket.on("player:join", (data: { sessionId: string; playerName: string; teamId: string; avatar?: string }, cb) => {
-      const player = gameStore.addPlayer(data.sessionId, socket.id, data.playerName, data.teamId, data.avatar || "🎮");
+    socket.on("player:join", (data: { sessionId: string; playerKey: string; playerName: string; teamId: string; avatar?: string }, cb) => {
+      if (!data.playerKey) {
+        if (typeof cb === "function") cb({ success: false, error: "Missing playerKey" });
+        return;
+      }
+      const player = gameStore.addPlayer(data.sessionId, socket.id, data.playerKey, data.playerName, data.teamId, data.avatar || "🎮");
       if (!player) {
-        if (typeof cb === "function") cb({ success: false, error: "Could not join. Game may have already started." });
+        if (typeof cb === "function") cb({ success: false, error: "Could not join — session not found." });
         return;
       }
       socket.join(`session:${data.sessionId}`);
-      socket.join(`team:${data.sessionId}:${data.teamId}`);
+      socket.join(`team:${data.sessionId}:${player.teamId}`);
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:player_joined", state);
       if (typeof cb === "function") cb({ success: true, state });
-      logger.info({ sessionId: data.sessionId, playerName: data.playerName }, "Player joined");
+      logger.info({ sessionId: data.sessionId, playerName: data.playerName }, "Player joined / rejoined");
+    });
+
+    socket.on("player:leave", (data: { sessionId: string }, cb) => {
+      const removed = gameStore.leavePlayer(socket.id);
+      if (typeof cb === "function") cb({ success: !!removed });
+      if (removed) {
+        const state = gameStore.getPublicState(removed.sessionId);
+        io.to(`session:${removed.sessionId}`).emit("game:player_left", state);
+      }
     });
 
     socket.on("spectator:join", (data: { sessionId: string }, cb) => {
@@ -148,6 +194,8 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.numberSurvivalState = null;
       session.faceMergeState = null;
       session.mysteryPuzzleState = null;
+      session.pacmanState = null;
+      stopPacmanLoop(data.sessionId);
 
       if (data.type === "number_survival") {
         gameStore.initNumberSurvival(data.sessionId);
@@ -155,6 +203,9 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
         gameStore.initFaceMerge(data.sessionId);
       } else if (data.type === "mystery_puzzle" && data.puzzleData) {
         gameStore.initMysteryPuzzle(data.sessionId, data.puzzleData.story, data.puzzleData.clues);
+      } else if (data.type === "pacman") {
+        gameStore.initPacMan(data.sessionId, 30);
+        startPacmanLoop(data.sessionId);
       }
 
       const state = gameStore.getPublicState(data.sessionId);
@@ -164,18 +215,26 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     socket.on("admin:end_minigame", (data: { sessionId: string; winnerTeamId?: string }) => {
       const session = gameStore.getSession(data.sessionId);
       if (!session) return;
+      stopPacmanLoop(data.sessionId);
       if (data.winnerTeamId) gameStore.awardPoint(data.sessionId, data.winnerTeamId);
       session.status = "round_end";
       session.miniGameType = null;
       session.numberSurvivalState = null;
       session.faceMergeState = null;
       session.mysteryPuzzleState = null;
+      session.pacmanState = null;
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:minigame_ended", state);
     });
 
-    socket.on("pacman:direction", (data: { sessionId: string; teamId: string; direction: string }) => {
-      io.to(`admin:${data.sessionId}`).emit("pacman:direction", { teamId: data.teamId, direction: data.direction });
+    socket.on("pacman:direction", (data: { sessionId: string; direction: string }) => {
+      const dirMap: Record<string, { x: number; y: number }> = {
+        up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 },
+      };
+      const dir = dirMap[data.direction];
+      if (!dir) return;
+      gameStore.pacmanSetDirection(data.sessionId, socket.id, dir);
+      // Don't broadcast on every direction press; the tick loop will reflect it
     });
 
     socket.on("number:select", (data: { sessionId: string; number: number }) => {

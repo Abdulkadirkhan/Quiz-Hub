@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
+import QRCode from "react-qr-code";
 import { getSocket } from "@/lib/socket";
 import { GameState, MiniGameType, MysteryPuzzleClue, Question } from "@/lib/types";
 import { getTeamColors } from "@/lib/teamColors";
@@ -99,6 +100,7 @@ export default function AdminGame() {
     socket.on("game:number_next_round", onState); socket.on("game:number_done", onState);
     socket.on("game:face_merge_updated", onState);
     socket.on("game:mystery_updated", onState);
+    socket.on("game:pacman_tick", onState);
 
     return () => {
       socket.off("game:question"); socket.off("game:buzzed"); socket.off("game:score_update");
@@ -109,6 +111,7 @@ export default function AdminGame() {
       socket.off("game:number_update", onState); socket.off("game:number_result", onState);
       socket.off("game:number_next_round", onState); socket.off("game:number_done", onState);
       socket.off("game:face_merge_updated", onState); socket.off("game:mystery_updated", onState);
+      socket.off("game:pacman_tick", onState);
       stopTimer();
     };
   }, [sessionId]);
@@ -338,16 +341,30 @@ export default function AdminGame() {
           {teams.map((team) => {
             const colors = getTeamColors(team.color);
             const teamPlayers = players[team.id] || [];
+            const baseUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}` : "";
+            const joinUrl = `${baseUrl}/join/${sessionId}/${team.id}`;
             return (
-              <div key={team.id} className={`rounded-xl p-4 border-2 text-center ${colors.border} ${colors.light}`}>
-                <div className={`text-3xl font-black ${colors.text}`}>{team.score}</div>
-                <div className="text-sm font-bold text-gray-700">{team.name}</div>
-                <div className="flex flex-wrap justify-center gap-1 mt-1">
-                  {teamPlayers.map((p, i) => (
-                    <span key={i} className="text-xs bg-gray-200/60 px-1.5 py-0.5 rounded-full flex items-center gap-1 text-gray-700">
-                      <span>{p.avatar}</span> {p.name}
-                    </span>
-                  ))}
+              <div key={team.id} className={`rounded-xl p-3 border-2 ${colors.border} ${colors.light}`}>
+                <div className="flex items-center gap-3">
+                  {/* QR */}
+                  <a href={joinUrl} target="_blank" rel="noreferrer" className="bg-white p-1.5 rounded-md shrink-0 block" title="Open join link">
+                    <QRCode value={joinUrl} size={64} />
+                  </a>
+                  {/* Score + name + players */}
+                  <div className="flex-1 min-w-0 text-center">
+                    <div className={`text-2xl font-black ${colors.text} leading-tight`}>{team.score}</div>
+                    <div className="text-xs font-bold text-gray-700 leading-tight">{team.name}</div>
+                    <div className="flex flex-wrap justify-center gap-1 mt-1">
+                      {teamPlayers.length === 0 && (
+                        <span className="text-[10px] text-gray-500 italic">scan to join →</span>
+                      )}
+                      {teamPlayers.map((p, i) => (
+                        <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 ${p.connected === false ? "bg-gray-300/40 text-gray-500 line-through" : "bg-gray-200/60 text-gray-700"}`} title={p.connected === false ? "Disconnected — they can rejoin via the QR" : ""}>
+                          <span>{p.avatar}</span> {p.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -372,7 +389,7 @@ export default function AdminGame() {
             </div>
             {miniGameType === "pacman" && (
               <div className="flex justify-center">
-                <PacManGame key={miniGameKey} team1={teams[0]} team2={teams[1]} onGameEnd={handlePacManEnd} socket={socketRef.current} sessionId={sessionId} />
+                <PacManGame key={miniGameKey} team1={teams[0]} team2={teams[1]} onGameEnd={handlePacManEnd} socket={socketRef.current} sessionId={sessionId} gameState={gameState} />
               </div>
             )}
             {miniGameType === "number_survival" && (

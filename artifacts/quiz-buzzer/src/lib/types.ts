@@ -1,7 +1,7 @@
 export type TeamColor = "blue" | "red" | "green" | "yellow" | "purple" | "orange";
 
 export interface Team { id: string; name: string; color: TeamColor; score: number; }
-export interface PlayerInfo { name: string; teamId: string; avatar: string; }
+export interface PlayerInfo { name: string; teamId: string; avatar: string; connected?: boolean; }
 export interface Question { id: string; text: string; choices?: { label: string; text: string }[]; timeLimit?: number; }
 
 export type GameStatus = "lobby" | "playing" | "question_active" | "buzzed" | "round_end" | "finished" | "minigame" | "buzzer_active";
@@ -54,7 +54,30 @@ export interface MysteryPuzzleData {
   winnerTeamId: string | null;
 }
 
-export interface PacmanData { type: "pacman"; }
+export interface PacManPlayerView {
+  playerKey: string;
+  name: string;
+  teamId: string;
+  color: string;
+  avatar: string;
+  x: number; y: number;
+  dir: { x: number; y: number };
+  score: number;
+  mouthOpen: boolean;
+}
+
+export interface PacmanData {
+  type: "pacman";
+  cols: number;
+  rows: number;
+  walls: boolean[][];
+  pellets: boolean[][];
+  players: PacManPlayerView[];
+  teamScores: Record<string, number>;
+  durationSec: number;
+  remainingMs: number;
+  ended: boolean;
+}
 
 export type MiniGameData = NumberSurvivalData | FaceMergeData | MysteryPuzzleData | PacmanData | null;
 

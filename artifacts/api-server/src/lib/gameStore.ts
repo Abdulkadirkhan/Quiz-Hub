@@ -3,7 +3,16 @@ import { logger } from "./logger";
 export type TeamColor = "blue" | "red" | "green" | "yellow" | "purple" | "orange";
 
 export interface Team { id: string; name: string; color: TeamColor; score: number; }
-export interface Player { socketId: string; name: string; teamId: string; hasBuzzed: boolean; avatar: string; eliminated: boolean; }
+export interface Player {
+  socketId: string;
+  playerKey: string;
+  name: string;
+  teamId: string;
+  hasBuzzed: boolean;
+  avatar: string;
+  eliminated: boolean;
+  connected: boolean;
+}
 export interface Question { id: string; text: string; choices?: { label: string; text: string }[]; timeLimit?: number; }
 
 export type GameStatus = "lobby" | "playing" | "question_active" | "buzzed" | "round_end" | "finished" | "minigame" | "buzzer_active";
@@ -36,6 +45,31 @@ export interface FaceMergeState {
 
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
 
+export interface PacManPlayer {
+  socketId: string;
+  playerKey: string;
+  name: string;
+  teamId: string;
+  color: string;
+  avatar: string;
+  x: number; y: number;
+  dir: { x: number; y: number };
+  nextDir: { x: number; y: number };
+  score: number;
+  mouthOpen: boolean;
+}
+
+export interface PacManState {
+  walls: boolean[][];
+  pellets: boolean[][];
+  players: Map<string, PacManPlayer>; // keyed by playerKey
+  startedAt: number;
+  endsAt: number;
+  durationSec: number;
+  ended: boolean;
+  cols: number; rows: number;
+}
+
 export interface MysteryPuzzleAttempt {
   code: string;
   correct: boolean;
@@ -61,6 +95,7 @@ export interface GameSession {
   numberSurvivalState: NumberSurvivalState | null;
   faceMergeState: FaceMergeState | null;
   mysteryPuzzleState: MysteryPuzzleState | null;
+  pacmanState: PacManState | null;
 }
 
 const DEFAULT_QUESTIONS: Question[] = [
@@ -82,6 +117,7 @@ class GameStore {
       currentQuestionIndex: -1, status: "lobby", buzzedBy: null, adminSocketId,
       createdAt: Date.now(), miniGameType: null,
       numberSurvivalState: null, faceMergeState: null, mysteryPuzzleState: null,
+      pacmanState: null,
     };
     this.sessions.set(id, session);
     logger.info({ sessionId: id, teams: teamNames }, "Game session created");
@@ -90,21 +126,62 @@ class GameStore {
 
   getSession(id: string): GameSession | undefined { return this.sessions.get(id); }
 
-  addPlayer(sessionId: string, socketId: string, name: string, teamId: string, avatar: string): Player | null {
+  // Join or rejoin a player. If a player with the same playerKey already exists in the session,
+  // we reattach them to the new socket (preserves score/eliminated/etc.). Otherwise we create a new player.
+  // Allowed at any session status — game-in-progress reconnect works seamlessly.
+  addPlayer(sessionId: string, socketId: string, playerKey: string, name: string, teamId: string, avatar: string): Player | null {
     const session = this.sessions.get(sessionId);
-    if (!session || session.status !== "lobby") return null;
-    const player: Player = { socketId, name, teamId, hasBuzzed: false, avatar, eliminated: false };
+    if (!session) return null;
+
+    // Try to find existing player by playerKey (rejoin path)
+    for (const [oldSocketId, existing] of session.players) {
+      if (existing.playerKey === playerKey) {
+        // Move record to new socket id, freshen the connection
+        session.players.delete(oldSocketId);
+        const updated: Player = { ...existing, socketId, name: name || existing.name, avatar: avatar || existing.avatar, teamId: existing.teamId, connected: true };
+        session.players.set(socketId, updated);
+        // If they were the Mystery Puzzle solver, update solver mapping to the new socketId
+        if (session.mysteryPuzzleState && session.mysteryPuzzleState.solverByTeam[updated.teamId] === oldSocketId) {
+          session.mysteryPuzzleState.solverByTeam[updated.teamId] = socketId;
+        }
+        logger.info({ sessionId, playerName: updated.name, teamId: updated.teamId }, "Player rejoined");
+        return updated;
+      }
+    }
+
+    // New player
+    const player: Player = { socketId, playerKey, name, teamId, hasBuzzed: false, avatar, eliminated: false, connected: true };
     session.players.set(socketId, player);
     logger.info({ sessionId, playerName: name, teamId }, "Player joined");
     return player;
   }
 
+  // Marks a player disconnected on socket disconnect, but keeps the record so they can rejoin
+  // with the same playerKey and resume their state.
   removePlayer(socketId: string): { sessionId: string; player: Player } | null {
     for (const [sessionId, session] of this.sessions.entries()) {
       const player = session.players.get(socketId);
       if (player) {
+        player.connected = false;
+        logger.info({ sessionId, playerName: player.name }, "Player disconnected (record kept for rejoin)");
+        return { sessionId, player };
+      }
+    }
+    return null;
+  }
+
+  // Permanently delete a player (e.g., they tapped "Leave Game"). Cleans up references.
+  leavePlayer(socketId: string): { sessionId: string; player: Player } | null {
+    for (const [sessionId, session] of this.sessions.entries()) {
+      const player = session.players.get(socketId);
+      if (player) {
         session.players.delete(socketId);
-        logger.info({ sessionId, playerName: player.name }, "Player disconnected");
+        // Clean up Mystery Puzzle solver references
+        if (session.mysteryPuzzleState && session.mysteryPuzzleState.solverByTeam[player.teamId] === socketId) {
+          delete session.mysteryPuzzleState.solverByTeam[player.teamId];
+          delete session.mysteryPuzzleState.solverNamesByTeam[player.teamId];
+        }
+        logger.info({ sessionId, playerName: player.name }, "Player left game (record removed)");
         return { sessionId, player };
       }
     }
@@ -153,6 +230,7 @@ class GameStore {
     s.numberSurvivalState = null;
     s.faceMergeState = null;
     s.mysteryPuzzleState = null;
+    s.pacmanState = null;
     for (const p of s.players.values()) p.hasBuzzed = false;
     logger.info({ sessionId, questionIndex: index }, "Show specific question");
     return s.questions[index];
@@ -224,6 +302,7 @@ class GameStore {
     s.numberSurvivalState = null;
     s.faceMergeState = null;
     s.mysteryPuzzleState = null;
+    s.pacmanState = null;
     for (const p of s.players.values()) p.hasBuzzed = false;
     logger.info({ sessionId }, "Round reset to live screen");
     return true;
@@ -395,11 +474,18 @@ class GameStore {
 
     const eliminated: string[] = [];
     for (const [, sids] of numToSids) {
-      if (sids.length > 1) {
-        for (const sid of sids) {
-          eliminated.push(sid); ns.survivors.delete(sid);
-          const p = s.players.get(sid); if (p) p.eliminated = true;
-        }
+      if (sids.length <= 1) continue;
+      // Group these picks by team — same-team duplicates are SAFE; only cross-team collisions eliminate
+      const teamsHit = new Set<string>();
+      for (const sid of sids) {
+        const p = s.players.get(sid);
+        if (p) teamsHit.add(p.teamId);
+      }
+      if (teamsHit.size <= 1) continue; // all from same team -> nobody eliminated
+      // Multiple teams collided on this number -> eliminate everyone who picked it
+      for (const sid of sids) {
+        eliminated.push(sid); ns.survivors.delete(sid);
+        const p = s.players.get(sid); if (p) p.eliminated = true;
       }
     }
     for (const sid of [...ns.survivors]) {
@@ -438,14 +524,181 @@ class GameStore {
     return true;
   }
 
+  // -------- PAC-MAN (server-authoritative, multi-player) --------
+
+  private buildPacManMaze(): { walls: boolean[][]; pellets: boolean[][]; cols: number; rows: number } {
+    const TEMPLATE = [
+      "#####################",
+      "#........#..........#",
+      "#.##.###.#.###.##.###",
+      "#...................#",
+      "#.##.#.#####.#.##.##",
+      "#....#...#...#....##",
+      "####.###.#.###.#####",
+      "#....#.......#.....#",
+      "#.##.#.#####.#.##.##",
+      "#...................#",
+      "#.##.###.#.###.##.###",
+      "#........#..........#",
+      "#.##.###.#.###.##.###",
+      "#...................#",
+      "#.##.#.#####.#.##.##",
+      "#....#...#...#....##",
+      "#...................#",
+      "#........#..........#",
+      "#####################",
+    ];
+    const rows = TEMPLATE.length;
+    const cols = 21;
+    const walls: boolean[][] = [];
+    const pellets: boolean[][] = [];
+    for (let r = 0; r < rows; r++) {
+      const wallRow: boolean[] = [];
+      const pelletRow: boolean[] = [];
+      const rowStr = (TEMPLATE[r] || "#####################").padEnd(cols, "#");
+      for (let c = 0; c < cols; c++) {
+        const ch = rowStr[c];
+        wallRow.push(ch === "#");
+        pelletRow.push(ch === ".");
+      }
+      walls.push(wallRow);
+      pellets.push(pelletRow);
+    }
+    return { walls, pellets, cols, rows };
+  }
+
+  private pickPacManSpawnPositions(walls: boolean[][], cols: number, rows: number, n: number): { x: number; y: number }[] {
+    const candidates: { x: number; y: number }[] = [];
+    const seeds = [
+      { x: 1, y: 1 }, { x: cols - 2, y: 1 }, { x: 1, y: rows - 2 }, { x: cols - 2, y: rows - 2 },
+      { x: Math.floor(cols / 2), y: 1 }, { x: Math.floor(cols / 2), y: rows - 2 },
+      { x: 1, y: Math.floor(rows / 2) }, { x: cols - 2, y: Math.floor(rows / 2) },
+      { x: 3, y: 3 }, { x: cols - 4, y: 3 }, { x: 3, y: rows - 4 }, { x: cols - 4, y: rows - 4 },
+      { x: 7, y: 5 }, { x: cols - 8, y: 5 }, { x: 7, y: rows - 6 }, { x: cols - 8, y: rows - 6 },
+    ];
+    const isOpen = (x: number, y: number) =>
+      x >= 0 && y >= 0 && x < cols && y < rows && !walls[y]?.[x];
+    for (const s of seeds) {
+      if (isOpen(s.x, s.y) && !candidates.some((c) => c.x === s.x && c.y === s.y)) candidates.push(s);
+    }
+    if (candidates.length < n) {
+      for (let y = 1; y < rows - 1; y++) {
+        for (let x = 1; x < cols - 1; x++) {
+          if (isOpen(x, y) && !candidates.some((c) => c.x === x && c.y === y)) candidates.push({ x, y });
+          if (candidates.length >= n + 8) break;
+        }
+        if (candidates.length >= n + 8) break;
+      }
+    }
+    return candidates.slice(0, n);
+  }
+
+  private static PAC_COLORS = [
+    "#facc15", "#fb923c", "#f87171", "#f472b6", "#a78bfa", "#60a5fa", "#22d3ee", "#4ade80",
+    "#f97316", "#ef4444", "#ec4899", "#8b5cf6", "#3b82f6", "#06b6d4", "#10b981", "#eab308",
+  ];
+
+  initPacMan(sessionId: string, durationSec = 30): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s) return false;
+    s.miniGameType = "pacman";
+    const { walls, pellets, cols, rows } = this.buildPacManMaze();
+    const playerEntries = [...s.players.values()].filter((p) => p.connected);
+    const spawns = this.pickPacManSpawnPositions(walls, cols, rows, playerEntries.length);
+    const players = new Map<string, PacManPlayer>();
+    playerEntries.forEach((p, i) => {
+      const pos = spawns[i] ?? { x: 1, y: 1 };
+      const color = GameStore.PAC_COLORS[i % GameStore.PAC_COLORS.length];
+      players.set(p.playerKey, {
+        socketId: p.socketId, playerKey: p.playerKey, name: p.name, teamId: p.teamId,
+        avatar: p.avatar, color,
+        x: pos.x, y: pos.y, dir: { x: 0, y: 0 }, nextDir: { x: 0, y: 0 },
+        score: 0, mouthOpen: true,
+      });
+    });
+    const now = Date.now();
+    s.pacmanState = {
+      walls, pellets, players, cols, rows,
+      startedAt: now, endsAt: now + durationSec * 1000,
+      durationSec, ended: false,
+    };
+    return true;
+  }
+
+  pacmanSetDirection(sessionId: string, socketId: string, dir: { x: number; y: number }): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.pacmanState || s.pacmanState.ended) return false;
+    const player = s.players.get(socketId);
+    if (!player) return false;
+    const pm = s.pacmanState.players.get(player.playerKey);
+    if (!pm) return false;
+    pm.nextDir = dir;
+    return true;
+  }
+
+  pacmanTick(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.pacmanState || s.pacmanState.ended) return false;
+    const pm = s.pacmanState;
+    const tryMove = (x: number, y: number, dir: { x: number; y: number }): { x: number; y: number } | null => {
+      if (dir.x === 0 && dir.y === 0) return null;
+      const nx = x + dir.x; const ny = y + dir.y;
+      if (nx < 0 || ny < 0 || nx >= pm.cols || ny >= pm.rows) return null;
+      if (pm.walls[ny]?.[nx]) return null;
+      return { x: nx, y: ny };
+    };
+    for (const p of pm.players.values()) {
+      const tryNext = tryMove(p.x, p.y, p.nextDir);
+      if (tryNext) {
+        p.dir = { ...p.nextDir };
+        p.x = tryNext.x; p.y = tryNext.y;
+      } else {
+        const tryCur = tryMove(p.x, p.y, p.dir);
+        if (tryCur) { p.x = tryCur.x; p.y = tryCur.y; }
+        else continue;
+      }
+      if (pm.pellets[p.y]?.[p.x]) {
+        pm.pellets[p.y][p.x] = false;
+        p.score += 1;
+      }
+      p.mouthOpen = !p.mouthOpen;
+    }
+    let pelletCount = 0;
+    for (const row of pm.pellets) for (const v of row) if (v) pelletCount++;
+    if (pelletCount === 0) {
+      const fresh = this.buildPacManMaze();
+      pm.pellets = fresh.pellets;
+    }
+    if (Date.now() >= pm.endsAt) pm.ended = true;
+    return true;
+  }
+
+  pacmanFinish(sessionId: string): { teamScores: Record<string, number>; winnerTeamId: string | null } | null {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.pacmanState) return null;
+    const pm = s.pacmanState;
+    pm.ended = true;
+    const teamScores: Record<string, number> = {};
+    for (const t of s.teams) teamScores[t.id] = 0;
+    for (const p of pm.players.values()) teamScores[p.teamId] = (teamScores[p.teamId] || 0) + p.score;
+    let best = -1; let winnerTeamId: string | null = null; let tied = false;
+    for (const [tid, sc] of Object.entries(teamScores)) {
+      if (sc > best) { best = sc; winnerTeamId = tid; tied = false; }
+      else if (sc === best) { tied = true; }
+    }
+    return { teamScores, winnerTeamId: tied ? null : winnerTeamId };
+  }
+
+  // -------- end PAC-MAN --------
+
   getPublicState(sessionId: string) {
     const s = this.sessions.get(sessionId);
     if (!s) return null;
 
-    const players: Record<string, { name: string; teamId: string; avatar: string }[]> = {};
+    const players: Record<string, { name: string; teamId: string; avatar: string; connected: boolean }[]> = {};
     for (const team of s.teams) players[team.id] = [];
     for (const player of s.players.values()) {
-      if (players[player.teamId]) players[player.teamId].push({ name: player.name, teamId: player.teamId, avatar: player.avatar });
+      if (players[player.teamId]) players[player.teamId].push({ name: player.name, teamId: player.teamId, avatar: player.avatar, connected: player.connected });
     }
 
     const currentQuestion = s.currentQuestionIndex >= 0 ? s.questions[s.currentQuestionIndex] : null;
@@ -485,8 +738,24 @@ class GameStore {
         solverByTeam: mp.solverByTeam, solverNamesByTeam: mp.solverNamesByTeam,
         attempts: mp.attempts, winnerTeamId: mp.winnerTeamId,
       };
-    } else if (s.miniGameType === "pacman") {
-      miniGameData = { type: "pacman" };
+    } else if (s.miniGameType === "pacman" && s.pacmanState) {
+      const pm = s.pacmanState;
+      const players: Array<{ playerKey: string; name: string; teamId: string; color: string; avatar: string; x: number; y: number; dir: { x: number; y: number }; score: number; mouthOpen: boolean }> = [];
+      for (const p of pm.players.values()) {
+        players.push({ playerKey: p.playerKey, name: p.name, teamId: p.teamId, color: p.color, avatar: p.avatar, x: p.x, y: p.y, dir: p.dir, score: p.score, mouthOpen: p.mouthOpen });
+      }
+      const teamScores: Record<string, number> = {};
+      for (const t of s.teams) teamScores[t.id] = 0;
+      for (const p of pm.players.values()) teamScores[p.teamId] += p.score;
+      const remainingMs = Math.max(0, pm.endsAt - Date.now());
+      miniGameData = {
+        type: "pacman",
+        cols: pm.cols, rows: pm.rows,
+        walls: pm.walls, pellets: pm.pellets,
+        players, teamScores,
+        durationSec: pm.durationSec,
+        remainingMs, ended: pm.ended,
+      };
     }
 
     return {

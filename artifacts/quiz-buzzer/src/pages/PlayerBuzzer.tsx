@@ -151,7 +151,21 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
               <p className="font-black text-white text-base leading-tight">{playerName}</p>
             </div>
           </div>
-          <div className="px-3 py-1 rounded-full text-sm font-bold" style={{ backgroundColor: teamFg, color: teamBg }}>{team.name}</div>
+          <div className="flex items-center gap-2">
+            <div className="px-3 py-1 rounded-full text-sm font-bold" style={{ backgroundColor: teamFg, color: teamBg }}>{team.name}</div>
+            <button
+              onClick={() => {
+                if (!confirm("Leave the game? You'll need to rejoin via the QR code.")) return;
+                socket.emit("player:leave", { sessionId }, () => {});
+                try { localStorage.removeItem("quiz_player_identity"); } catch {}
+                window.location.reload();
+              }}
+              className="text-white/40 hover:text-white/70 text-xs underline"
+              title="Leave game"
+            >
+              Leave
+            </button>
+          </div>
         </div>
         <div className="flex gap-2 mt-3 flex-wrap">
           {teams.map((t) => (
