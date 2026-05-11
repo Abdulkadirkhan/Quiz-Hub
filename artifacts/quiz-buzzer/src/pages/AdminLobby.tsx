@@ -124,6 +124,12 @@ export default function AdminLobby() {
               >
                 🎮 Manage Mini-Games →
               </button>
+              <button
+                onClick={() => navigate("/admin/sequence")}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-4 rounded-xl font-black text-lg transition"
+              >
+                🗂️ Manage Sequence →
+              </button>
             </div>
           </div>
         ) : (

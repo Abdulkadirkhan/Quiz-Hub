@@ -170,20 +170,26 @@ export default function SpectatorView() {
               <div className="space-y-4">
                 {fmData.merged && (
                   <div className="flex justify-center">
-                    <img src={fmData.merged} alt="Merged" className="w-48 h-48 object-cover rounded-xl border-2 border-pink-500" />
+                    <div className="bg-black rounded-xl border-2 border-pink-500 overflow-hidden" style={{ width: "min(40vh, 240px)", aspectRatio: "1/1" }}>
+                      <img src={fmData.merged} alt="Merged" className="w-full h-full object-contain" />
+                    </div>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-3">
                   {fmData.image1 && (
                     <div className="text-center">
                       <p className="text-xs text-gray-400 font-semibold mb-1">Person 1</p>
-                      <img src={fmData.image1} alt="Person 1" className="w-full h-48 object-cover rounded-xl border-2 border-pink-400" />
+                      <div className="w-full bg-black rounded-xl border-2 border-pink-400 overflow-hidden" style={{ aspectRatio: "3/4", maxHeight: "60vh" }}>
+                        <img src={fmData.image1} alt="Person 1" className="w-full h-full object-contain" />
+                      </div>
                     </div>
                   )}
                   {fmData.image2 && (
                     <div className="text-center">
                       <p className="text-xs text-gray-400 font-semibold mb-1">Person 2</p>
-                      <img src={fmData.image2} alt="Person 2" className="w-full h-48 object-cover rounded-xl border-2 border-pink-400" />
+                      <div className="w-full bg-black rounded-xl border-2 border-pink-400 overflow-hidden" style={{ aspectRatio: "3/4", maxHeight: "60vh" }}>
+                        <img src={fmData.image2} alt="Person 2" className="w-full h-full object-contain" />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -237,20 +243,8 @@ export default function SpectatorView() {
         )}
 
         {isMiniGame && miniGameType === "mystery_puzzle" && mpData && (
-          <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-amber-700">
+          <div className="bg-gray-900 rounded-2xl p-4 mb-6 border-2 border-amber-700">
             <h2 className="text-xl font-black text-amber-400 text-center mb-3">🔐 Mystery Puzzle</h2>
-
-            {/* 2 decorative locks + vault code display */}
-            <div className="flex items-center justify-center gap-6 mb-4">
-              <div className="text-6xl">{mpData.vaultRevealed ? "🔓" : "🔒"}</div>
-              <div className="text-center">
-                <p className="text-xs text-amber-400 font-bold uppercase">Vault</p>
-                <p className="font-mono text-3xl font-black text-amber-300 tracking-widest">
-                  {mpData.vaultRevealed ? mpData.vaultCode : "????"}
-                </p>
-              </div>
-              <div className="text-6xl">{mpData.vaultRevealed ? "🔓" : "🔒"}</div>
-            </div>
 
             {/* Winner banner */}
             {mpData.winnerTeamId && (() => {
@@ -263,36 +257,67 @@ export default function SpectatorView() {
               ) : null;
             })()}
 
-            {/* Solvers per team */}
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {teams.map((team) => {
-                const solverName = mpData.solverNamesByTeam?.[team.id];
+            {/* Split-screen — Team A | Team B */}
+            <div className="grid grid-cols-2 gap-3">
+              {teams.slice(0, 2).map((team) => {
+                const td = mpData.teamData?.[team.id];
                 const colors = getTeamColors(team.color);
-                return (
-                  <div key={team.id} className={`rounded-lg p-2 border ${colors.border} bg-gray-800`}>
-                    <p className={`text-xs font-bold ${colors.text}`}>{team.name}</p>
-                    <p className="text-white text-sm font-bold mt-0.5 truncate">
-                      {solverName ? <>🔑 {solverName}</> : <span className="text-gray-500">No solver</span>}
-                    </p>
+                const solverName = mpData.solverNamesByTeam?.[team.id];
+                if (!td) return (
+                  <div key={team.id} className={`rounded-xl p-3 border-2 ${colors.border} bg-gray-800/40 flex items-center justify-center min-h-[200px]`}>
+                    <p className="text-gray-500 text-xs text-center">No puzzle for {team.name}</p>
                   </div>
                 );
-              })}
-            </div>
-
-            {mpData.story && (
-              <p className="text-gray-300 text-sm italic text-center mb-4 px-2">"{mpData.story}"</p>
-            )}
-
-            {/* Revealed clues */}
-            <div className="space-y-2 mb-3">
-              {mpData.clues.map((clue, i) => {
-                const revealed = mpData.revealedClues.includes(i);
+                const collectedDigits = td.clues.filter((c) => c.digit !== null).map((c) => c.digit as string);
                 return (
-                  <div key={i} className={`rounded-lg p-3 border ${revealed ? "border-amber-500 bg-amber-950/30" : "border-gray-700 bg-gray-800/50"}`}>
-                    <p className="text-xs text-gray-500 mb-1">Clue {i + 1} → digit {i + 1}{revealed ? "" : " (not revealed)"}</p>
-                    <p className={`text-sm ${revealed ? "text-white font-semibold" : "text-gray-600 italic"}`}>
-                      {revealed ? clue.question : "—"}
-                    </p>
+                  <div key={team.id} className={`rounded-xl p-3 border-2 ${colors.border} bg-gray-800/40 space-y-2`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className={`font-black text-sm ${colors.text}`}>{team.name}</p>
+                        <p className="text-[10px] text-gray-400">🔑 {solverName || "—"}</p>
+                      </div>
+                      <div className="text-3xl">{td.vaultUnlocked ? "🔓" : "🔒"}</div>
+                    </div>
+
+                    {td.story && (
+                      <p className="text-gray-300 text-[10px] italic leading-snug">{td.story}</p>
+                    )}
+
+                    {/* Clues (only revealed text) */}
+                    <div className="space-y-1">
+                      {td.clues.map((clue, i) => {
+                        if (!clue.revealed) {
+                          return (
+                            <div key={i} className="rounded p-1.5 border border-gray-700 bg-gray-900/50">
+                              <p className="text-[10px] text-gray-600">Clue {i + 1} — hidden</p>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={i} className={`rounded p-1.5 border ${clue.digit !== null ? "border-green-600 bg-green-950/20" : "border-amber-500 bg-amber-950/20"}`}>
+                            <div className="flex items-start gap-2">
+                              <p className="text-[10px] text-amber-400 shrink-0">C{i + 1}</p>
+                              <p className="text-white text-[11px] leading-snug flex-1">{clue.question}</p>
+                              {clue.digit !== null && (
+                                <span className="bg-green-700 text-white font-mono font-black text-xs px-1.5 rounded shrink-0">{clue.digit}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Collected digits (random order) */}
+                    {collectedDigits.length > 0 && (
+                      <div className="bg-black/30 rounded p-2 text-center">
+                        <p className="text-[9px] text-amber-400 font-bold uppercase mb-1">Digits collected</p>
+                        <div className="flex justify-center gap-1">
+                          {collectedDigits.map((d, i) => (
+                            <span key={i} className="bg-amber-500/30 border border-amber-400 text-amber-100 font-mono font-black text-base w-7 h-7 rounded flex items-center justify-center">{d}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

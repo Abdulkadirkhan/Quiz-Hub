@@ -18,6 +18,8 @@ export interface NumberSurvivalData {
   currentResult: { round: number; choices: Array<{ socketId: string; name: string; teamId: string; avatar: string; number: number }>; eliminated: string[]; survivorsByTeam: Record<string, number> } | null;
   mySelections: Record<string, number>;
   survivorIds: string[];
+  remainingMs?: number;
+  durationSec?: number;
 }
 
 export interface FaceMergeData {
@@ -40,14 +42,15 @@ export interface MysteryPuzzleAttempt {
   teamId: string;
 }
 
+export interface MysteryPuzzleTeamView {
+  story: string;
+  clues: Array<{ question: string; answer: string; revealed: boolean; digit: string | null }>;
+  vaultUnlocked: boolean;
+}
+
 export interface MysteryPuzzleData {
   type: "mystery_puzzle";
-  story: string;
-  clues: MysteryPuzzleClue[];
-  currentClueIndex: number;
-  revealedClues: number[];
-  vaultCode: string;
-  vaultRevealed: boolean;
+  teamData: Record<string, MysteryPuzzleTeamView>;
   solverByTeam: Record<string, string>;
   solverNamesByTeam: Record<string, string>;
   attempts: MysteryPuzzleAttempt[];

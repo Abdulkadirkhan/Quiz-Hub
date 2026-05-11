@@ -45,7 +45,12 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
   const solverName = mpData.solverNamesByTeam[team.id];
   const winnerTeam = mpData.winnerTeamId ? gameState.teams.find((t) => t.id === mpData.winnerTeamId) : null;
   const myTeamWon = winnerTeam?.id === team.id;
-  const someoneElseWon = !!winnerTeam && !myTeamWon;
+
+  // My team's puzzle data only
+  const myTd = mpData.teamData[team.id];
+  const myClues = myTd?.clues ?? [];
+  const collectedDigits = myClues.filter((c) => c.digit !== null).map((c) => c.digit as string);
+  const allDigitsCollected = myClues.length === 4 && collectedDigits.length === 4;
 
   const setDigit = (i: number, value: string) => {
     const v = value.replace(/\D/g, "").slice(0, 1);
@@ -80,6 +85,11 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
     });
   };
 
+  const handleClear = () => {
+    setCode(["", "", "", ""]);
+    setFeedback("idle");
+  };
+
   const handleSubmit = () => {
     const joined = code.join("");
     if (joined.length !== 4) return;
@@ -92,17 +102,11 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
         setFeedback("wrong");
         setShake(true);
         setTimeout(() => setShake(false), 500);
+        // Clear after a moment so they can try the next permutation
+        setTimeout(() => { setCode(["", "", "", ""]); setFeedback("idle"); }, 800);
       }
     });
   };
-
-  // Auto-submit when 4 digits are filled
-  useEffect(() => {
-    if (code.every((d) => /^[0-9]$/.test(d)) && feedback === "idle" && !submitting && !winnerTeam && isSolver) {
-      handleSubmit();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: teamBg }}>
@@ -127,34 +131,31 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col px-4 pb-8 pt-4 gap-4">
-
-        {/* 2 decorative locks */}
-        <div className="flex items-center justify-center gap-6">
+      <div className="flex-1 flex flex-col px-4 pb-8 pt-2 gap-3">
+        {/* Lock + title */}
+        <div className="flex items-center justify-center gap-4">
           <div className="text-5xl">{winnerTeam ? "🔓" : "🔒"}</div>
-          <div className="text-center text-yellow-400 font-bold text-sm">VAULT</div>
+          <div className="text-center">
+            <p className="text-xs text-yellow-400/70 font-bold uppercase">{team.name}'s Vault</p>
+            <p className="text-xs text-white/50">{collectedDigits.length} of 4 digits collected</p>
+          </div>
           <div className="text-5xl">{winnerTeam ? "🔓" : "🔒"}</div>
         </div>
 
-        {/* Story */}
-        {mpData.story && (
+        {/* My team's clues, revealed only */}
+        {myClues.some((c) => c.revealed) && (
           <div className="bg-black/30 rounded-xl p-3">
-            <p className="text-xs text-white/40 font-bold uppercase mb-1">📖 Story</p>
-            <p className="text-white/80 text-sm leading-relaxed">{mpData.story}</p>
-          </div>
-        )}
-
-        {/* Revealed clues so far */}
-        {mpData.revealedClues.length > 0 && (
-          <div className="bg-black/20 rounded-xl p-3">
-            <p className="text-xs font-bold uppercase mb-2 text-yellow-400">🧩 Clues Revealed</p>
+            <p className="text-xs font-bold uppercase mb-2 text-yellow-400">🧩 Your Clues</p>
             <div className="space-y-1.5">
-              {mpData.clues.map((clue, i) => {
-                if (!mpData.revealedClues.includes(i)) return null;
+              {myClues.map((clue, i) => {
+                if (!clue.revealed) return null;
                 return (
-                  <div key={i} className="bg-white/5 rounded-lg p-2">
-                    <p className="text-[11px] text-white/40">Clue {i + 1}</p>
-                    <p className="text-white text-sm font-semibold">{clue.question}</p>
+                  <div key={i} className="bg-white/5 rounded-lg p-2 flex items-start gap-2">
+                    <p className="text-[11px] text-white/40 shrink-0">{i + 1}</p>
+                    <p className="text-white text-sm font-semibold flex-1">{clue.question}</p>
+                    {clue.digit !== null && (
+                      <span className="bg-green-700 text-white font-mono font-black text-base px-2 py-0.5 rounded">{clue.digit}</span>
+                    )}
                   </div>
                 );
               })}
@@ -162,17 +163,31 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
           </div>
         )}
 
-        {mpData.revealedClues.length === 0 && (
+        {!myClues.some((c) => c.revealed) && (
           <div className="text-center text-white/40 text-sm py-2 italic">
-            Waiting for the host to reveal the first clue…
+            Waiting for the host to reveal your first clue…
           </div>
         )}
 
-        {/* WINNER — game over banner */}
+        {/* Collected digits panel */}
+        {collectedDigits.length > 0 && !winnerTeam && (
+          <div className="bg-black/30 rounded-xl p-3 text-center">
+            <p className="text-xs text-yellow-400 font-bold uppercase mb-2">🔢 Your digits (random order)</p>
+            <div className="flex justify-center gap-2">
+              {collectedDigits.map((d, i) => (
+                <span key={i} className="bg-amber-500/20 border-2 border-amber-400 text-amber-200 font-mono font-black text-2xl w-12 h-12 rounded-lg flex items-center justify-center">{d}</span>
+              ))}
+            </div>
+            {allDigitsCollected && (
+              <p className="text-xs text-amber-200 mt-2">All 4 digits collected — try different orders below to unlock!</p>
+            )}
+          </div>
+        )}
+
+        {/* WINNER banner */}
         {winnerTeam && (
           <div className={`rounded-xl p-4 text-center ${myTeamWon ? "bg-green-900 border-2 border-green-400" : "bg-red-900/40 border-2 border-red-700"}`}>
             <p className="text-2xl font-black text-white mb-1">{myTeamWon ? "🏆 YOUR TEAM WINS!" : "💔 Other team won"}</p>
-            <p className="text-sm text-white/70">Code was <span className="font-mono font-black text-yellow-300">{mpData.vaultCode}</span></p>
           </div>
         )}
 
@@ -180,23 +195,23 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
         {!winnerTeam && (
           <>
             {!isSolver ? (
-              <div className="bg-black/30 rounded-xl p-6 text-center flex-1 flex flex-col items-center justify-center">
-                <div className="text-5xl mb-3">🔑</div>
+              <div className="bg-black/30 rounded-xl p-4 text-center flex-1 flex flex-col items-center justify-center">
+                <div className="text-4xl mb-2">🔑</div>
                 {solverName ? (
                   <>
-                    <p className="text-white font-bold text-lg">{solverName}</p>
+                    <p className="text-white font-bold text-base">{solverName}</p>
                     <p className="text-white/60 text-sm mt-1">is unlocking the vault for {team.name}</p>
-                    <p className="text-white/40 text-xs mt-3">Help your teammate solve the clues — they'll enter the code on their phone</p>
+                    <p className="text-white/40 text-xs mt-2">Help your teammate figure out the order!</p>
                   </>
                 ) : (
-                  <p className="text-white/60 text-sm">No solver chosen for this team</p>
+                  <p className="text-white/60 text-sm">No solver chosen yet</p>
                 )}
               </div>
             ) : (
-              <div className={`bg-black/30 rounded-xl p-4 space-y-4 ${shake ? "animate-shake" : ""}`}>
+              <div className={`bg-black/30 rounded-xl p-3 space-y-3 ${shake ? "animate-shake" : ""}`}>
                 <p className="text-center text-yellow-300 font-black text-sm uppercase">🔑 You are the solver</p>
 
-                {/* 4-digit display */}
+                {/* 4-digit input */}
                 <div className="flex justify-center gap-2">
                   {code.map((d, i) => (
                     <input
@@ -222,11 +237,11 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
                   ))}
                 </div>
 
-                {feedback === "wrong" && <p className="text-center text-red-300 text-sm font-bold">Wrong code — try again</p>}
-                {feedback === "correct" && <p className="text-center text-green-300 text-sm font-bold">✓ Correct!</p>}
+                {feedback === "wrong" && <p className="text-center text-red-300 text-sm font-bold">Wrong order — try a different permutation</p>}
+                {feedback === "correct" && <p className="text-center text-green-300 text-sm font-bold">✓ Unlocked!</p>}
 
                 {/* On-screen keypad */}
-                <div className="grid grid-cols-3 gap-2 mt-2">
+                <div className="grid grid-cols-3 gap-2">
                   {["1","2","3","4","5","6","7","8","9"].map((n) => (
                     <button
                       key={n}
@@ -253,26 +268,21 @@ export default function MysteryPuzzleController({ team, socket, sessionId, playe
                     {submitting ? "..." : "✓"}
                   </button>
                 </div>
+                <button onClick={handleClear} disabled={submitting} className="w-full text-xs text-white/40 hover:text-white/70 underline">Clear</button>
               </div>
             )}
           </>
         )}
 
-        {/* Attempt count */}
         {!winnerTeam && mpData.attempts.length > 0 && (
           <div className="text-center text-white/30 text-xs">
-            {mpData.attempts.length} attempt{mpData.attempts.length === 1 ? "" : "s"} so far
+            {mpData.attempts.filter((a) => a.teamId === team.id).length} attempts by {team.name}
           </div>
         )}
       </div>
 
       <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-6px); }
-          50% { transform: translateX(6px); }
-          75% { transform: translateX(-3px); }
-        }
+        @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 50%{transform:translateX(6px)} 75%{transform:translateX(-3px)} }
         .animate-shake { animation: shake 0.4s; }
       `}</style>
     </div>

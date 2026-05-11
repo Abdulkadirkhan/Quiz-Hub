@@ -213,14 +213,18 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
       </div>
 
       {phase === "revealed" && fmData!.image1 && fmData!.image2 && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 max-w-3xl mx-auto">
           <div className="flex flex-col items-center gap-1">
             <p className="text-xs text-gray-400 font-semibold">Person 1</p>
-            <img src={fmData!.image1} alt="Person 1" className="w-full h-32 object-cover rounded-xl border-2 border-pink-400" />
+            <div className="w-full bg-black rounded-xl border-2 border-pink-400 overflow-hidden" style={{ aspectRatio: "3/4", maxHeight: "70vh" }}>
+              <img src={fmData!.image1} alt="Person 1" className="w-full h-full object-contain" />
+            </div>
           </div>
           <div className="flex flex-col items-center gap-1">
             <p className="text-xs text-gray-400 font-semibold">Person 2</p>
-            <img src={fmData!.image2} alt="Person 2" className="w-full h-32 object-cover rounded-xl border-2 border-pink-400" />
+            <div className="w-full bg-black rounded-xl border-2 border-pink-400 overflow-hidden" style={{ aspectRatio: "3/4", maxHeight: "70vh" }}>
+              <img src={fmData!.image2} alt="Person 2" className="w-full h-full object-contain" />
+            </div>
           </div>
         </div>
       )}

@@ -9,6 +9,7 @@ import NumberSurvivalGame from "./NumberSurvivalGame";
 import FaceMergeGame from "./FaceMergeGame";
 import MysteryPuzzleGame from "./MysteryPuzzleGame";
 import MiniGameSelector from "./MiniGameSelector";
+import { loadSequence, SequenceItem } from "./SequenceManager";
 
 interface MiniGameResult { winner: "team1" | "team2" | "tie"; scores: [number, number]; }
 
@@ -18,6 +19,24 @@ function loadQuestions(): Question[] {
     if (raw) return JSON.parse(raw) as Question[];
   } catch {}
   return [];
+}
+
+function loadSavedMysteryPuzzlePayload(teamAId: string, teamBId: string): { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[] }> } | null {
+  try {
+    const raw = localStorage.getItem("quiz_minigames_mystery_puzzle_v2");
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as { teamA: { story: string; clues: { question: string; digit: string }[] }; teamB: { story: string; clues: { question: string; digit: string }[] } };
+    const mkClues = (raw: { question: string; digit: string }[]): MysteryPuzzleClue[] =>
+      raw.slice(0, 4).map((c) => ({ question: c.question || "", answer: "", reward: c.digit || "0" }));
+    return {
+      teamPuzzles: {
+        [teamAId]: { story: saved.teamA.story || "", clues: mkClues(saved.teamA.clues) },
+        [teamBId]: { story: saved.teamB.story || "", clues: mkClues(saved.teamB.clues) },
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 export default function AdminGame() {
@@ -36,6 +55,10 @@ export default function AdminGame() {
   const [usedQuestionIndices, setUsedQuestionIndices] = useState<Set<number>>(new Set());
   const [miniGameResult, setMiniGameResult] = useState<{ winnerTeamId?: string; label: string } | null>(null);
   const [miniGameKey, setMiniGameKey] = useState(0);
+
+  // Sequence state
+  const [sequence, setSequence] = useState<SequenceItem[]>(() => loadSequence());
+  const [sequenceCursor, setSequenceCursor] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const socketRef = useRef(getSocket());
@@ -147,7 +170,7 @@ export default function AdminGame() {
     } catch {}
   };
 
-  const handleSelectMiniGame = (type: MiniGameType, data?: { story: string; clues: MysteryPuzzleClue[] }) => {
+  const handleSelectMiniGame = (type: MiniGameType, data?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[] }> }) => {
     setShowSelector(false);
     if (!type) return;
     emit("admin:start_minigame", { type, puzzleData: data });
@@ -174,6 +197,46 @@ export default function AdminGame() {
     emit("admin:show_question", { questionIndex: index });
   };
 
+  // ---- Sequence advancement ----
+  const advanceSequence = () => {
+    if (sequenceCursor >= sequence.length) return;
+    const item = sequence[sequenceCursor];
+    const teams = gameState?.teams ?? [];
+
+    if (item.kind === "question") {
+      const qIdx = questions.findIndex((q) => q.id === item.questionId);
+      if (qIdx >= 0) emit("admin:show_question", { questionIndex: qIdx });
+    } else if (item.kind === "manual_question") {
+      emit("admin:reset_round");
+      setShowManualScore(true);
+    } else if (item.kind === "buzzer") {
+      emit("admin:reset_round");
+      // tiny delay so reset processes first
+      setTimeout(() => emit("admin:open_buzzer"), 100);
+    } else if (item.kind === "minigame") {
+      if (item.minigameType === "mystery_puzzle") {
+        if (teams.length < 2) {
+          alert("Mystery Puzzle needs 2 teams.");
+          return;
+        }
+        const payload = loadSavedMysteryPuzzlePayload(teams[0].id, teams[1].id);
+        if (!payload) {
+          alert("No Mystery Puzzle is saved. Open Manage Mini-Games first.");
+          return;
+        }
+        emit("admin:start_minigame", { type: "mystery_puzzle", puzzleData: payload });
+      } else {
+        emit("admin:start_minigame", { type: item.minigameType });
+      }
+    }
+    setSequenceCursor((c) => c + 1);
+  };
+
+  const resetSequence = () => {
+    if (!confirm("Reset sequence back to the first item?")) return;
+    setSequenceCursor(0);
+  };
+
   if (!gameState) {
     return <div className="min-h-screen bg-gray-950 flex items-center justify-center"><div className="text-white text-xl">Loading game…</div></div>;
   }
@@ -192,7 +255,7 @@ export default function AdminGame() {
 
   return (
     <div className={`min-h-screen transition-all duration-300 ${buzzFlash ? "bg-orange-950" : "bg-gray-950"} text-white`}>
-      {showSelector && <MiniGameSelector onSelect={handleSelectMiniGame} onClose={() => setShowSelector(false)} />}
+      {showSelector && <MiniGameSelector teams={teams} onSelect={handleSelectMiniGame} onClose={() => setShowSelector(false)} />}
 
       {/* Question picker modal */}
       {showQuestionPicker && (
@@ -296,6 +359,25 @@ export default function AdminGame() {
             <p className="text-gray-500 text-sm">Session: {sessionId}</p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            {sequence.length > 0 && (
+              <button
+                onClick={advanceSequence}
+                disabled={sequenceCursor >= sequence.length}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2"
+                title={sequenceCursor < sequence.length ? `Next: ${sequence[sequenceCursor].kind === "question" ? "Question" : sequence[sequenceCursor].kind === "minigame" ? "Mini-Game" : sequence[sequenceCursor].kind === "buzzer" ? "Buzzer" : "Manual"}` : "Sequence complete"}
+              >
+                ▶ Next ({sequenceCursor + 1}/{sequence.length})
+              </button>
+            )}
+            {sequence.length > 0 && sequenceCursor > 0 && (
+              <button
+                onClick={resetSequence}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg font-bold text-xs transition"
+                title="Reset sequence to start"
+              >
+                ↺
+              </button>
+            )}
             {!miniGameActive && (
               <button onClick={() => setShowQuestionPicker(true)} className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2">
                 📋 Questions

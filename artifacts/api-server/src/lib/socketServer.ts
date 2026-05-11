@@ -40,6 +40,40 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     }
   };
 
+  // Per-session Number Survival round timers (auto-resolves selecting phase at 30s)
+  const numberSurvivalLoops = new Map<string, NodeJS.Timeout>();
+  const startNumberSurvivalLoop = (sessionId: string) => {
+    stopNumberSurvivalLoop(sessionId);
+    const tick = () => {
+      const session = gameStore.getSession(sessionId);
+      if (!session || session.miniGameType !== "number_survival" || !session.numberSurvivalState) {
+        stopNumberSurvivalLoop(sessionId);
+        return;
+      }
+      const ns = session.numberSurvivalState;
+      // Broadcast clock tick (cheap, drives UI countdown)
+      const state = gameStore.getPublicState(sessionId);
+      io.to(`session:${sessionId}`).emit("game:number_update", state);
+      if (ns.phase === "selecting" && Date.now() >= ns.endsAt) {
+        const result = gameStore.resolveNumberRound(sessionId);
+        if (result) {
+          const after = gameStore.getPublicState(sessionId);
+          io.to(`session:${sessionId}`).emit("game:number_result", after);
+        }
+      }
+      if (ns.phase === "done") stopNumberSurvivalLoop(sessionId);
+    };
+    const id = setInterval(tick, 1000);
+    numberSurvivalLoops.set(sessionId, id);
+  };
+  const stopNumberSurvivalLoop = (sessionId: string) => {
+    const existing = numberSurvivalLoops.get(sessionId);
+    if (existing) {
+      clearInterval(existing);
+      numberSurvivalLoops.delete(sessionId);
+    }
+  };
+
   io.on("connection", (socket: Socket) => {
     logger.info({ socketId: socket.id }, "Socket connected");
 
@@ -92,6 +126,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
 
     socket.on("admin:reset_round", (data: { sessionId: string }) => {
       stopPacmanLoop(data.sessionId);
+      stopNumberSurvivalLoop(data.sessionId);
       const ok = gameStore.resetRound(data.sessionId);
       if (!ok) return;
       const state = gameStore.getPublicState(data.sessionId);
@@ -106,6 +141,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
 
     socket.on("admin:end_game", (data: { sessionId: string }) => {
       stopPacmanLoop(data.sessionId);
+      stopNumberSurvivalLoop(data.sessionId);
       gameStore.endGame(data.sessionId);
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:finished", state);
@@ -186,7 +222,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       if (typeof cb === "function") cb({ state });
     });
 
-    socket.on("admin:start_minigame", (data: { sessionId: string; type: string; puzzleData?: { story: string; clues: MysteryPuzzleClue[] } }) => {
+    socket.on("admin:start_minigame", (data: { sessionId: string; type: string; puzzleData?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }> } }) => {
       const session = gameStore.getSession(data.sessionId);
       if (!session) return;
       session.status = "minigame";
@@ -196,13 +232,15 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.mysteryPuzzleState = null;
       session.pacmanState = null;
       stopPacmanLoop(data.sessionId);
+      stopNumberSurvivalLoop(data.sessionId);
 
       if (data.type === "number_survival") {
         gameStore.initNumberSurvival(data.sessionId);
+        startNumberSurvivalLoop(data.sessionId);
       } else if (data.type === "face_merge") {
         gameStore.initFaceMerge(data.sessionId);
-      } else if (data.type === "mystery_puzzle" && data.puzzleData) {
-        gameStore.initMysteryPuzzle(data.sessionId, data.puzzleData.story, data.puzzleData.clues);
+      } else if (data.type === "mystery_puzzle" && data.puzzleData?.teamPuzzles) {
+        gameStore.initMysteryPuzzle(data.sessionId, data.puzzleData.teamPuzzles);
       } else if (data.type === "pacman") {
         gameStore.initPacMan(data.sessionId, 30);
         startPacmanLoop(data.sessionId);
@@ -216,6 +254,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       const session = gameStore.getSession(data.sessionId);
       if (!session) return;
       stopPacmanLoop(data.sessionId);
+      stopNumberSurvivalLoop(data.sessionId);
       if (data.winnerTeamId) gameStore.awardPoint(data.sessionId, data.winnerTeamId);
       session.status = "round_end";
       session.miniGameType = null;
@@ -267,8 +306,13 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     socket.on("admin:number_next_round", (data: { sessionId: string }) => {
       const ok = gameStore.advanceNumberRound(data.sessionId);
       const state = gameStore.getPublicState(data.sessionId);
-      if (ok) io.to(`session:${data.sessionId}`).emit("game:number_next_round", state);
-      else io.to(`session:${data.sessionId}`).emit("game:number_done", state);
+      if (ok) {
+        startNumberSurvivalLoop(data.sessionId);
+        io.to(`session:${data.sessionId}`).emit("game:number_next_round", state);
+      } else {
+        stopNumberSurvivalLoop(data.sessionId);
+        io.to(`session:${data.sessionId}`).emit("game:number_done", state);
+      }
     });
 
     socket.on("admin:face_merge_setup", (data: { sessionId: string; sets: Array<{ image1: string; image2: string; merged?: string | null }> }) => {
@@ -314,36 +358,18 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       io.to(`session:${data.sessionId}`).emit("game:buzzed", { buzzEvent: session.buzzedBy, state });
     });
 
-    socket.on("admin:mystery_show_clue", (data: { sessionId: string; clueIndex: number }) => {
-      const ok = gameStore.showMysteryClue(data.sessionId, data.clueIndex);
+    socket.on("admin:mystery_reveal_clue", (data: { sessionId: string; teamId: string; clueIndex: number }) => {
+      const ok = gameStore.revealMysteryClue(data.sessionId, data.teamId, data.clueIndex);
       if (!ok) return;
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:mystery_updated", state);
     });
 
-    socket.on("admin:mystery_reveal_answer", (data: { sessionId: string; clueIndex: number }) => {
-      const ok = gameStore.revealMysteryAnswer(data.sessionId, data.clueIndex);
+    socket.on("admin:mystery_reveal_digit", (data: { sessionId: string; teamId: string; clueIndex: number }) => {
+      const ok = gameStore.revealMysteryDigit(data.sessionId, data.teamId, data.clueIndex);
       if (!ok) return;
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:mystery_updated", state);
-    });
-
-    socket.on("admin:mystery_reveal_vault", (data: { sessionId: string }) => {
-      const ok = gameStore.revealMysteryVault(data.sessionId);
-      if (!ok) return;
-      const state = gameStore.getPublicState(data.sessionId);
-      io.to(`session:${data.sessionId}`).emit("game:mystery_updated", state);
-    });
-
-    socket.on("mystery:answer", (data: { sessionId: string; answer: string; clueIndex: number }) => {
-      const session = gameStore.getSession(data.sessionId);
-      if (!session) return;
-      const player = session.players.get(socket.id);
-      if (!player) return;
-      io.to(`admin:${data.sessionId}`).emit("mystery:player_answer", {
-        socketId: socket.id, name: player.name, teamId: player.teamId, avatar: player.avatar,
-        answer: data.answer, clueIndex: data.clueIndex,
-      });
     });
 
     socket.on("mystery:submit_code", (data: { sessionId: string; code: string }, ack?: (res: { ok: boolean; correct: boolean; reason?: string }) => void) => {

@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 
-// ---------- Face Merge sets ----------
+// ====================== FACE MERGE ======================
 
 interface FaceMergeSet {
   id: string;
@@ -11,7 +11,7 @@ interface FaceMergeSet {
 }
 
 const FACE_MERGE_SETS_KEY = "quiz_minigames_face_merge_sets";
-const OLD_FACE_MERGE_KEY = "quiz_minigames_face_merge"; // legacy single-set key
+const OLD_FACE_MERGE_KEY = "quiz_minigames_face_merge";
 
 function newId() { return Math.random().toString(36).slice(2, 9); }
 
@@ -23,7 +23,6 @@ function loadFaceMergeSets(): FaceMergeSet[] {
       if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
-  // Migrate from legacy single-set storage
   try {
     const oldRaw = localStorage.getItem(OLD_FACE_MERGE_KEY);
     if (oldRaw) {
@@ -38,15 +37,33 @@ function loadFaceMergeSets(): FaceMergeSet[] {
   return [];
 }
 
-// ---------- Mystery Puzzle ----------
+function readFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target?.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ====================== MYSTERY PUZZLE (v2 split-team) ======================
 
 interface MysteryClueDraft { question: string; digit: string; }
-interface MysteryConfig { story: string; clues: MysteryClueDraft[]; }
-const MYSTERY_KEY = "quiz_minigames_mystery_puzzle";
+interface MysteryTeamDraft {
+  story: string;
+  clues: MysteryClueDraft[]; // exactly 4
+}
+interface MysteryConfigV2 {
+  teamA: MysteryTeamDraft;
+  teamB: MysteryTeamDraft;
+}
 
-function emptyMystery(): MysteryConfig {
+const MYSTERY_KEY_V2 = "quiz_minigames_mystery_puzzle_v2";
+const MYSTERY_KEY_V1 = "quiz_minigames_mystery_puzzle"; // legacy
+
+function emptyTeamDraft(name: string): MysteryTeamDraft {
   return {
-    story: "The vault is locked! Solve the 4 clues to crack the 4-digit code.",
+    story: `${name}'s vault is locked. Solve 4 clues to collect 4 digits — then figure out the correct order to unlock!`,
     clues: [
       { question: "", digit: "" },
       { question: "", digit: "" },
@@ -56,29 +73,26 @@ function emptyMystery(): MysteryConfig {
   };
 }
 
-function loadMystery(): MysteryConfig {
+function emptyMysteryV2(): MysteryConfigV2 {
+  return { teamA: emptyTeamDraft("Team A"), teamB: emptyTeamDraft("Team B") };
+}
+
+function loadMysteryV2(): MysteryConfigV2 {
   try {
-    const raw = localStorage.getItem(MYSTERY_KEY);
+    const raw = localStorage.getItem(MYSTERY_KEY_V2);
     if (raw) {
-      const parsed = JSON.parse(raw) as MysteryConfig;
-      if (parsed && Array.isArray(parsed.clues)) {
-        // Pad/trim to exactly 4
-        const clues = [...parsed.clues];
-        while (clues.length < 4) clues.push({ question: "", digit: "" });
-        return { story: parsed.story || "", clues: clues.slice(0, 4) };
+      const parsed = JSON.parse(raw) as MysteryConfigV2;
+      if (parsed?.teamA && parsed?.teamB) {
+        // Pad/trim clues to 4
+        for (const team of [parsed.teamA, parsed.teamB]) {
+          while (team.clues.length < 4) team.clues.push({ question: "", digit: "" });
+          team.clues = team.clues.slice(0, 4);
+        }
+        return parsed;
       }
     }
   } catch {}
-  return emptyMystery();
-}
-
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+  return emptyMysteryV2();
 }
 
 // ============================================================
@@ -91,10 +105,8 @@ export default function MiniGameManager() {
   const [fmSavedNotice, setFmSavedNotice] = useState(false);
   const [fmError, setFmError] = useState("");
 
-  // Mystery Puzzle state
-  const initialMystery = loadMystery();
-  const [story, setStory] = useState(initialMystery.story);
-  const [clues, setClues] = useState<MysteryClueDraft[]>(initialMystery.clues);
+  // Mystery Puzzle state (split team)
+  const [mystery, setMystery] = useState<MysteryConfigV2>(loadMysteryV2);
   const [mpSavedNotice, setMpSavedNotice] = useState(false);
   const [mpError, setMpError] = useState("");
 
@@ -114,31 +126,17 @@ export default function MiniGameManager() {
   const updateSetImage = async (setId: string, field: "merged" | "image1" | "image2", file: File | null) => {
     setFmError("");
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      setFmError("Image is larger than 2 MB. Please use a smaller file.");
-      return;
-    }
+    if (file.size > 2 * 1024 * 1024) { setFmError("Image is larger than 2 MB."); return; }
     try {
       const data = await readFile(file);
       setSets((prev) => prev.map((s) => s.id === setId ? { ...s, [field]: data } : s));
-    } catch {
-      setFmError("Could not read that file. Try another image.");
-    }
+    } catch { setFmError("Could not read that file."); }
   };
-
   const removeSetImage = (setId: string, field: "merged" | "image1" | "image2") => {
     setSets((prev) => prev.map((s) => s.id === setId ? { ...s, [field]: null } : s));
   };
-
-  const addSet = () => {
-    setSets((prev) => [...prev, { id: newId(), merged: null, image1: null, image2: null }]);
-  };
-
-  const removeSet = (setId: string) => {
-    if (!confirm("Delete this image set?")) return;
-    setSets((prev) => prev.filter((s) => s.id !== setId));
-  };
-
+  const addSet = () => setSets((prev) => [...prev, { id: newId(), merged: null, image1: null, image2: null }]);
+  const removeSet = (setId: string) => { if (confirm("Delete this image set?")) setSets((prev) => prev.filter((s) => s.id !== setId)); };
   const moveSet = (idx: number, dir: -1 | 1) => {
     setSets((prev) => {
       const next = [...prev];
@@ -148,19 +146,14 @@ export default function MiniGameManager() {
       return next;
     });
   };
-
   const saveFaceMerge = () => {
     setFmError("");
     try {
       localStorage.setItem(FACE_MERGE_SETS_KEY, JSON.stringify(sets));
-      // Also clean up the legacy single-set key now that we've saved to the new one
       localStorage.removeItem(OLD_FACE_MERGE_KEY);
       setFmSavedNotice(true);
-    } catch {
-      setFmError("Couldn't save — total image size may be too large. Reduce file sizes or remove sets.");
-    }
+    } catch { setFmError("Couldn't save — total image size may be too large."); }
   };
-
   const clearFaceMerge = () => {
     if (!confirm("Clear all Face Merge sets?")) return;
     localStorage.removeItem(FACE_MERGE_SETS_KEY);
@@ -170,40 +163,42 @@ export default function MiniGameManager() {
 
   // ---------- Mystery Puzzle handlers ----------
 
-  const updateClue = (i: number, field: keyof MysteryClueDraft, value: string) => {
-    let v = value;
-    if (field === "digit") {
-      // Allow only one digit 0-9
-      v = value.replace(/\D/g, "").slice(0, 1);
-    }
-    setClues((prev) => prev.map((c, idx) => idx === i ? { ...c, [field]: v } : c));
+  const updateMysteryStory = (which: "teamA" | "teamB", value: string) => {
+    setMystery((prev) => ({ ...prev, [which]: { ...prev[which], story: value } }));
   };
-
+  const updateMysteryClue = (which: "teamA" | "teamB", clueIdx: number, field: keyof MysteryClueDraft, value: string) => {
+    let v = value;
+    if (field === "digit") v = value.replace(/\D/g, "").slice(0, 1);
+    setMystery((prev) => ({
+      ...prev,
+      [which]: {
+        ...prev[which],
+        clues: prev[which].clues.map((c, i) => i === clueIdx ? { ...c, [field]: v } : c),
+      },
+    }));
+  };
   const saveMystery = () => {
     setMpError("");
-    const allHaveDigits = clues.every((c) => /^[0-9]$/.test(c.digit));
-    if (!allHaveDigits) {
-      setMpError("Each of the 4 clues must have a single digit (0-9) for the vault code.");
+    const allValidA = mystery.teamA.clues.every((c) => /^[0-9]$/.test(c.digit));
+    const allValidB = mystery.teamB.clues.every((c) => /^[0-9]$/.test(c.digit));
+    if (!allValidA || !allValidB) {
+      setMpError("Each team's 4 clues must each have a single digit (0-9).");
       return;
     }
     try {
-      const payload: MysteryConfig = { story: story.trim(), clues };
-      localStorage.setItem(MYSTERY_KEY, JSON.stringify(payload));
+      localStorage.setItem(MYSTERY_KEY_V2, JSON.stringify(mystery));
+      localStorage.removeItem(MYSTERY_KEY_V1);
       setMpSavedNotice(true);
-    } catch {
-      setMpError("Couldn't save the puzzle.");
-    }
+    } catch { setMpError("Couldn't save the puzzle."); }
   };
-
   const clearMystery = () => {
-    if (!confirm("Clear the saved Mystery Puzzle?")) return;
-    localStorage.removeItem(MYSTERY_KEY);
-    const empty = emptyMystery();
-    setStory(empty.story);
-    setClues(empty.clues);
+    if (!confirm("Clear the saved Mystery Puzzle (both teams)?")) return;
+    localStorage.removeItem(MYSTERY_KEY_V2);
+    setMystery(emptyMysteryV2());
   };
 
-  const vaultPreview = clues.map((c) => /^[0-9]$/.test(c.digit) ? c.digit : "·").join("");
+  const digitsPreview = (team: MysteryTeamDraft) =>
+    team.clues.map((c) => /^[0-9]$/.test(c.digit) ? c.digit : "·").join(" ");
 
   // ---------- helpers ----------
 
@@ -224,19 +219,60 @@ export default function MiniGameManager() {
         </div>
       )}
       <div className="flex gap-2">
-        <button onClick={onPick} className="text-[10px] text-pink-400 hover:text-pink-300 underline">
-          {src ? "Change" : "Select"}
-        </button>
-        {src && (
-          <button onClick={onRemove} className="text-[10px] text-gray-500 hover:text-gray-400 underline">Remove</button>
-        )}
+        <button onClick={onPick} className="text-[10px] text-pink-400 hover:text-pink-300 underline">{src ? "Change" : "Select"}</button>
+        {src && <button onClick={onRemove} className="text-[10px] text-gray-500 hover:text-gray-400 underline">Remove</button>}
       </div>
     </div>
   );
 
+  // ---------- MysteryTeam column component ----------
+
+  const MysteryTeamColumn = ({ which, label, accent }: { which: "teamA" | "teamB"; label: string; accent: string }) => {
+    const team = mystery[which];
+    return (
+      <div className={`rounded-2xl p-4 border-2 ${accent} space-y-3`}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-black text-white">{label}</h3>
+          <div className="text-xs text-amber-300 font-mono">digits: <span className="font-black tracking-widest">{digitsPreview(team)}</span></div>
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Story</label>
+          <textarea
+            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-amber-400 h-16 resize-none"
+            placeholder="Story shown only to this team..."
+            value={team.story}
+            onChange={(e) => updateMysteryStory(which, e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          {team.clues.map((clue, i) => (
+            <div key={i} className="bg-gray-900/60 rounded-lg p-2 border border-gray-700 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-amber-300 font-bold text-xs">Clue {i + 1}</p>
+                <input
+                  className="bg-gray-900 border border-amber-600 rounded w-10 px-1 py-0.5 text-center text-white font-mono font-black text-base focus:outline-none focus:border-amber-400"
+                  placeholder="?"
+                  value={clue.digit}
+                  onChange={(e) => updateMysteryClue(which, i, "digit", e.target.value)}
+                  maxLength={1}
+                />
+              </div>
+              <textarea
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-amber-400 h-12 resize-none"
+                placeholder={`Riddle for this team (the answer reveals digit ${i + 1})`}
+                value={clue.question}
+                onChange={(e) => updateMysteryClue(which, i, "question", e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <div className="max-w-4xl mx-auto px-4 py-6">
+      <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
           <div>
             <h1 className="text-3xl font-black text-yellow-400">Manage Mini-Games</h1>
@@ -247,33 +283,22 @@ export default function MiniGameManager() {
           </button>
         </div>
 
-        {/* ============== FACE MERGE ============== */}
+        {/* FACE MERGE */}
         <div className="bg-gray-900 rounded-2xl p-6 border-2 border-pink-700 mb-6">
           <div className="flex items-start justify-between mb-4 flex-wrap gap-2">
             <div>
               <h2 className="text-xl font-black text-pink-400">🖼️ Face Merge</h2>
-              <p className="text-xs text-gray-400 mt-1">Add multiple image sets — each set is one round. During play, you'll go through them in order.</p>
+              <p className="text-xs text-gray-400 mt-1">Multiple image sets — played in order.</p>
             </div>
             <div className="flex gap-2">
               <button onClick={saveFaceMerge} className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-black text-sm transition">Save</button>
               <button onClick={clearFaceMerge} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition">Clear All</button>
             </div>
           </div>
-
-          {fmSavedNotice && (
-            <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">
-              ✓ Saved — these will load automatically when you start the Face Merge mini-game.
-            </div>
-          )}
-          {fmError && (
-            <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{fmError}</div>
-          )}
-
+          {fmSavedNotice && <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">✓ Saved.</div>}
+          {fmError && <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{fmError}</div>}
           <div className="space-y-4">
-            {sets.length === 0 && (
-              <div className="text-center py-8 text-gray-500 text-sm">No image sets yet — click "Add Image Set" below.</div>
-            )}
-
+            {sets.length === 0 && <div className="text-center py-8 text-gray-500 text-sm">No image sets yet.</div>}
             {sets.map((set, idx) => {
               const refMerged = { current: null as HTMLInputElement | null };
               const ref1 = { current: null as HTMLInputElement | null };
@@ -299,85 +324,29 @@ export default function MiniGameManager() {
                 </div>
               );
             })}
-
-            <button onClick={addSet} className="w-full py-3 rounded-xl border-2 border-dashed border-pink-700 text-pink-400 hover:bg-pink-950/30 hover:border-pink-500 font-bold text-sm transition">
-              + Add Image Set
-            </button>
+            <button onClick={addSet} className="w-full py-3 rounded-xl border-2 border-dashed border-pink-700 text-pink-400 hover:bg-pink-950/30 hover:border-pink-500 font-bold text-sm transition">+ Add Image Set</button>
           </div>
-
-          <p className="text-xs text-gray-600 text-center mt-4">{sets.length} {sets.length === 1 ? "set" : "sets"} • Saved in this browser • Keep each image under 2 MB</p>
+          <p className="text-xs text-gray-600 text-center mt-4">{sets.length} {sets.length === 1 ? "set" : "sets"} • Keep each image under 2 MB</p>
         </div>
 
-        {/* ============== MYSTERY PUZZLE ============== */}
+        {/* MYSTERY PUZZLE */}
         <div className="bg-gray-900 rounded-2xl p-6 border-2 border-amber-700 mb-6">
           <div className="flex items-start justify-between mb-4 flex-wrap gap-2">
             <div>
               <h2 className="text-xl font-black text-amber-400">🔐 Mystery Puzzle</h2>
-              <p className="text-xs text-gray-400 mt-1">4 clues — each gives one digit. Players race to enter the 4-digit vault code on their phone keypad.</p>
+              <p className="text-xs text-gray-400 mt-1">Each team gets their <span className="font-bold">own</span> 4 clues + digits. Server randomly shuffles each team's digits into a hidden unlock order — teams have to permute and try.</p>
             </div>
             <div className="flex gap-2">
               <button onClick={saveMystery} className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-black text-sm transition">Save</button>
               <button onClick={clearMystery} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition">Clear</button>
             </div>
           </div>
-
-          {mpSavedNotice && (
-            <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">
-              ✓ Puzzle saved — will load automatically when you start the Mystery Puzzle mini-game.
-            </div>
-          )}
-          {mpError && (
-            <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{mpError}</div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Story / Intro (read by the host)</label>
-              <textarea
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-400 h-20 resize-none"
-                placeholder="The vault is locked! Solve 4 clues to crack the 4-digit code..."
-                value={story}
-                onChange={(e) => setStory(e.target.value)}
-              />
-            </div>
-
-            <div className="bg-amber-950/30 border border-amber-700 rounded-lg p-3 text-center">
-              <p className="text-xs text-amber-400 font-bold uppercase mb-1">Vault Code Preview</p>
-              <p className="font-mono text-3xl font-black text-amber-300 tracking-widest">{vaultPreview}</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {clues.map((clue, i) => (
-                <div key={i} className="bg-gray-800/60 rounded-xl p-3 border border-gray-700 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-amber-300 font-bold text-sm">Clue {i + 1}</p>
-                    <span className="text-xs text-gray-500">→ digit position {i + 1}</span>
-                  </div>
-                  <textarea
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-amber-400 h-16 resize-none"
-                    placeholder="Riddle / question / hint that the host reads aloud"
-                    value={clue.question}
-                    onChange={(e) => updateClue(i, "question", e.target.value)}
-                  />
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 font-semibold">Digit (0-9):</span>
-                    <input
-                      className="bg-gray-900 border border-amber-600 rounded-lg w-14 px-2 py-1 text-center text-white font-mono font-black text-lg focus:outline-none focus:border-amber-400"
-                      placeholder="?"
-                      value={clue.digit}
-                      onChange={(e) => updateClue(i, "digit", e.target.value)}
-                      maxLength={1}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+          {mpSavedNotice && <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">✓ Puzzle saved.</div>}
+          {mpError && <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{mpError}</div>}
+          <div className="grid md:grid-cols-2 gap-4">
+            <MysteryTeamColumn which="teamA" label="Team A puzzle" accent="border-blue-700" />
+            <MysteryTeamColumn which="teamB" label="Team B puzzle" accent="border-red-700" />
           </div>
-        </div>
-
-        <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 opacity-60">
-          <h2 className="text-xl font-black text-gray-500">🔢 Number Survival / 👾 Pac-Man</h2>
-          <p className="text-xs text-gray-500 mt-1">No pre-game setup needed.</p>
         </div>
       </div>
     </div>

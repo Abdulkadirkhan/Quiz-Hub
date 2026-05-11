@@ -29,6 +29,8 @@ export interface RoundResult {
 export interface NumberSurvivalState {
   round: number; totalRounds: number; phase: "selecting" | "revealing" | "done";
   roundSelections: Map<string, number>; survivors: Set<string>; history: RoundResult[];
+  endsAt: number;  // timestamp when current selecting round auto-resolves
+  durationSec: number;
 }
 
 export interface FaceMergeSet {
@@ -44,6 +46,32 @@ export interface FaceMergeState {
 }
 
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
+
+export interface MysteryPuzzleAttempt {
+  code: string;
+  correct: boolean;
+  timestamp: number;
+  playerName: string;
+  teamId: string;
+}
+
+// Per-team puzzle data — each team has its own clues, digits, and unlock order
+export interface MysteryPuzzleTeamData {
+  story: string;
+  clues: MysteryPuzzleClue[];           // 4 clues
+  clueRevealed: boolean[];               // [false,false,false,false] -> shown to players?
+  digitRevealed: boolean[];              // separate flag — host reveals digit after team answers correctly
+  vaultCode: string;                     // 4-digit, the correct order
+  vaultUnlocked: boolean;
+}
+
+export interface MysteryPuzzleState {
+  teamData: Record<string, MysteryPuzzleTeamData>;  // keyed by teamId
+  solverByTeam: Record<string, string>;
+  solverNamesByTeam: Record<string, string>;
+  attempts: MysteryPuzzleAttempt[];
+  winnerTeamId: string | null;
+}
 
 export interface PacManPlayer {
   socketId: string;
@@ -68,24 +96,6 @@ export interface PacManState {
   durationSec: number;
   ended: boolean;
   cols: number; rows: number;
-}
-
-export interface MysteryPuzzleAttempt {
-  code: string;
-  correct: boolean;
-  timestamp: number;
-  playerName: string;
-  teamId: string;
-}
-
-export interface MysteryPuzzleState {
-  story: string; clues: MysteryPuzzleClue[];
-  currentClueIndex: number; revealedClues: number[];
-  vaultCode: string; vaultRevealed: boolean;
-  solverByTeam: Record<string, string>;          // teamId -> solver socketId
-  solverNamesByTeam: Record<string, string>;     // teamId -> solver display name
-  attempts: MysteryPuzzleAttempt[];
-  winnerTeamId: string | null;
 }
 
 export interface GameSession {
@@ -329,13 +339,31 @@ class GameStore {
     return true;
   }
 
-  initNumberSurvival(sessionId: string): boolean {
+  initNumberSurvival(sessionId: string, durationSec = 30): boolean {
     const s = this.sessions.get(sessionId);
     if (!s) return false;
     const allPlayerIds = new Set<string>();
-    for (const [sid] of s.players) allPlayerIds.add(sid);
+    for (const [sid, p] of s.players) { if (p.connected) allPlayerIds.add(sid); }
     s.miniGameType = "number_survival";
-    s.numberSurvivalState = { round: 1, totalRounds: 3, phase: "selecting", roundSelections: new Map(), survivors: allPlayerIds, history: [] };
+    s.numberSurvivalState = {
+      round: 1, totalRounds: 3, phase: "selecting",
+      roundSelections: new Map(), survivors: allPlayerIds, history: [],
+      endsAt: Date.now() + durationSec * 1000, durationSec,
+    };
+    return true;
+  }
+
+  // Called when host advances to next round
+  nextNumberRound(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.numberSurvivalState) return false;
+    const ns = s.numberSurvivalState;
+    if (ns.phase === "done") return false;
+    if (ns.round + 1 > ns.totalRounds) { ns.phase = "done"; return true; }
+    ns.round += 1;
+    ns.phase = "selecting";
+    ns.roundSelections = new Map();
+    ns.endsAt = Date.now() + ns.durationSec * 1000;
     return true;
   }
 
@@ -381,18 +409,18 @@ class GameStore {
     return true;
   }
 
-  initMysteryPuzzle(sessionId: string, story: string, clues: MysteryPuzzleClue[]): boolean {
+  initMysteryPuzzle(sessionId: string, teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }>): boolean {
     const s = this.sessions.get(sessionId);
     if (!s) return false;
     s.miniGameType = "mystery_puzzle";
 
-    // Pick a random solver per team from currently joined players
+    // Pick a random solver per team from currently joined connected players
     const solverByTeam: Record<string, string> = {};
     const solverNamesByTeam: Record<string, string> = {};
     for (const team of s.teams) {
       const teamPlayers: { sid: string; name: string }[] = [];
       for (const [sid, p] of s.players) {
-        if (p.teamId === team.id) teamPlayers.push({ sid, name: p.name });
+        if (p.teamId === team.id && p.connected) teamPlayers.push({ sid, name: p.name });
       }
       if (teamPlayers.length > 0) {
         const pick = teamPlayers[Math.floor(Math.random() * teamPlayers.length)];
@@ -401,14 +429,64 @@ class GameStore {
       }
     }
 
+    // Build per-team puzzle data
+    const teamData: Record<string, MysteryPuzzleTeamData> = {};
+    for (const team of s.teams) {
+      const puzzle = teamPuzzles[team.id] ?? { story: "", clues: [] as MysteryPuzzleClue[] };
+      const clues = puzzle.clues.slice(0, 4);
+      while (clues.length < 4) clues.push({ question: "", answer: "", reward: "0" });
+      const digits = clues.map((c) => c.reward);
+      // If admin provided a vaultCode, use it; otherwise shuffle the digits to get a hidden order
+      let vaultCode = (puzzle.vaultCode || "").trim();
+      const isValid = /^[0-9]{4}$/.test(vaultCode) &&
+        digits.slice().sort().join("") === vaultCode.split("").sort().join("");
+      if (!isValid) {
+        const shuffled = [...digits];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        vaultCode = shuffled.join("");
+      }
+      teamData[team.id] = {
+        story: puzzle.story || "",
+        clues,
+        clueRevealed: [false, false, false, false],
+        digitRevealed: [false, false, false, false],
+        vaultCode,
+        vaultUnlocked: false,
+      };
+    }
+
     s.mysteryPuzzleState = {
-      story, clues, currentClueIndex: -1, revealedClues: [],
-      vaultCode: clues.map((c) => c.reward).join(""),
-      vaultRevealed: false,
+      teamData,
       solverByTeam, solverNamesByTeam,
       attempts: [],
       winnerTeamId: null,
     };
+    return true;
+  }
+
+  // Host reveals a clue's text for a specific team
+  revealMysteryClue(sessionId: string, teamId: string, clueIndex: number): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.mysteryPuzzleState) return false;
+    const td = s.mysteryPuzzleState.teamData[teamId];
+    if (!td) return false;
+    if (clueIndex < 0 || clueIndex >= td.clues.length) return false;
+    td.clueRevealed[clueIndex] = true;
+    return true;
+  }
+
+  // Host reveals the digit behind a clue (after team answers correctly verbally)
+  revealMysteryDigit(sessionId: string, teamId: string, clueIndex: number): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.mysteryPuzzleState) return false;
+    const td = s.mysteryPuzzleState.teamData[teamId];
+    if (!td) return false;
+    if (clueIndex < 0 || clueIndex >= td.clues.length) return false;
+    td.clueRevealed[clueIndex] = true;
+    td.digitRevealed[clueIndex] = true;
     return true;
   }
 
@@ -422,41 +500,19 @@ class GameStore {
     if (mp.solverByTeam[player.teamId] !== socketId) {
       return { ok: false, correct: false, reason: "Only the chosen solver can submit" };
     }
+    const td = mp.teamData[player.teamId];
+    if (!td) return { ok: false, correct: false, reason: "No puzzle for this team" };
     const trimmed = code.trim();
-    const correct = trimmed === mp.vaultCode;
+    const correct = trimmed === td.vaultCode;
     mp.attempts.push({
       code: trimmed, correct, timestamp: Date.now(),
       playerName: player.name, teamId: player.teamId,
     });
     if (correct) {
       mp.winnerTeamId = player.teamId;
-      mp.vaultRevealed = true;
+      td.vaultUnlocked = true;
     }
     return { ok: true, correct, teamId: player.teamId, playerName: player.name };
-  }
-
-  showMysteryClue(sessionId: string, clueIndex: number): boolean {
-    const s = this.sessions.get(sessionId);
-    if (!s || !s.mysteryPuzzleState) return false;
-    const mp = s.mysteryPuzzleState;
-    if (clueIndex < -1 || clueIndex >= mp.clues.length) return false;
-    mp.currentClueIndex = clueIndex;
-    return true;
-  }
-
-  revealMysteryAnswer(sessionId: string, clueIndex: number): boolean {
-    const s = this.sessions.get(sessionId);
-    if (!s || !s.mysteryPuzzleState) return false;
-    const mp = s.mysteryPuzzleState;
-    if (!mp.revealedClues.includes(clueIndex)) mp.revealedClues.push(clueIndex);
-    return true;
-  }
-
-  revealMysteryVault(sessionId: string): boolean {
-    const s = this.sessions.get(sessionId);
-    if (!s || !s.mysteryPuzzleState) return false;
-    s.mysteryPuzzleState.vaultRevealed = true;
-    return true;
   }
 
   resolveNumberRound(sessionId: string): RoundResult | null {
@@ -510,7 +566,17 @@ class GameStore {
 
     const result: RoundResult = { round: ns.round, choices, eliminated, survivorsByTeam };
     ns.history.push(result);
-    if (ns.round >= ns.totalRounds || ns.survivors.size === 0) ns.phase = "done";
+
+    // End conditions:
+    // 1) 3 rounds complete (existing)
+    // 2) Total survivors hits zero
+    // 3) ANY team has zero survivors with at least one connected member (host's new rule)
+    let anyTeamEmpty = false;
+    for (const team of s.teams) {
+      const teamHasMembers = [...s.players.values()].some((p) => p.teamId === team.id && p.connected);
+      if (teamHasMembers && (survivorsByTeam[team.id] || 0) === 0) anyTeamEmpty = true;
+    }
+    if (ns.round >= ns.totalRounds || ns.survivors.size === 0 || anyTeamEmpty) ns.phase = "done";
     return result;
   }
 
@@ -521,6 +587,7 @@ class GameStore {
     if (ns.phase !== "revealing") return false;
     if (ns.round >= ns.totalRounds || ns.survivors.size === 0) { ns.phase = "done"; return false; }
     ns.round += 1; ns.phase = "selecting"; ns.roundSelections = new Map();
+    ns.endsAt = Date.now() + ns.durationSec * 1000;
     return true;
   }
 
@@ -716,6 +783,8 @@ class GameStore {
         selectedCount: ns.roundSelections.size, totalSurvivors: ns.survivors.size,
         teamSurvivors, history: ns.history, currentResult: ns.history[ns.history.length - 1] || null,
         mySelections: mySelection, survivorIds: [...ns.survivors],
+        remainingMs: ns.phase === "selecting" ? Math.max(0, ns.endsAt - Date.now()) : 0,
+        durationSec: ns.durationSec,
       };
     } else if (s.miniGameType === "face_merge" && s.faceMergeState) {
       const fm = s.faceMergeState;
@@ -731,12 +800,32 @@ class GameStore {
       };
     } else if (s.miniGameType === "mystery_puzzle" && s.mysteryPuzzleState) {
       const mp = s.mysteryPuzzleState;
+      // For each team, expose clues (text-only unless revealed), digits (per-team), and vault state.
+      // Vault codes themselves are not exposed in the public state to avoid leaking to the other team.
+      const teamData: Record<string, {
+        story: string;
+        clues: Array<{ question: string; answer: string; revealed: boolean; digit: string | null }>;
+        vaultUnlocked: boolean;
+      }> = {};
+      for (const [teamId, td] of Object.entries(mp.teamData)) {
+        teamData[teamId] = {
+          story: td.story,
+          clues: td.clues.map((c, i) => ({
+            question: c.question,
+            answer: c.answer,
+            revealed: td.clueRevealed[i],
+            digit: td.digitRevealed[i] ? c.reward : null,
+          })),
+          vaultUnlocked: td.vaultUnlocked,
+        };
+      }
       miniGameData = {
-        type: "mystery_puzzle", story: mp.story, clues: mp.clues,
-        currentClueIndex: mp.currentClueIndex, revealedClues: mp.revealedClues,
-        vaultCode: mp.vaultCode, vaultRevealed: mp.vaultRevealed,
-        solverByTeam: mp.solverByTeam, solverNamesByTeam: mp.solverNamesByTeam,
-        attempts: mp.attempts, winnerTeamId: mp.winnerTeamId,
+        type: "mystery_puzzle",
+        teamData,
+        solverByTeam: mp.solverByTeam,
+        solverNamesByTeam: mp.solverNamesByTeam,
+        attempts: mp.attempts,
+        winnerTeamId: mp.winnerTeamId,
       };
     } else if (s.miniGameType === "pacman" && s.pacmanState) {
       const pm = s.pacmanState;

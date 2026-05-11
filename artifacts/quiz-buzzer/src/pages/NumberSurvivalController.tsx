@@ -74,25 +74,16 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
   const { round, totalRounds, phase, currentResult } = data;
 
   // ===== END OF MINI-GAME =====
-  // Team-aware result takes precedence over personal elimination state.
+  // Host awards the point manually — no winner/loser banner here.
   if (phase === "done") {
     const teamCounts = localState.teams.map((t) => ({ id: t.id, name: t.name, count: (data.teamSurvivors[t.id] || []).length }));
-    teamCounts.sort((a, b) => b.count - a.count);
-    const top = teamCounts[0];
-    const tied = teamCounts.length > 1 && top.count === teamCounts[1].count;
-    const myTeamWon = !tied && top.id === team.id;
-    const myTeamCount = data.teamSurvivors[team.id]?.length ?? 0;
-
-    let icon = "🏆"; let title = "Round Won!"; let titleColor = "#4ade80";
-    if (tied) { icon = "🤝"; title = "It's a tie!"; titleColor = "#facc15"; }
-    else if (!myTeamWon) { icon = "💔"; title = "Round Lost"; titleColor = "#f87171"; }
 
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center" style={{ backgroundColor: teamBg }}>
-        <div className="text-6xl mb-3">{icon}</div>
-        <h2 className="text-4xl font-black mb-3" style={{ color: titleColor }}>{title}</h2>
-        <p className="text-white/70">Survivors per team:</p>
-        <div className="flex gap-3 mt-3">
+        <div className="text-6xl mb-3">🏁</div>
+        <h2 className="text-3xl font-black text-white mb-2">Round Complete</h2>
+        <p className="text-white/70 text-sm mb-4">Survivors per team:</p>
+        <div className="flex gap-3">
           {teamCounts.map((tc) => (
             <div key={tc.id} className={`px-4 py-2 rounded-xl ${tc.id === team.id ? "border-2 border-white/30" : ""}`} style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
               <div className="text-2xl font-black text-white">{tc.count}</div>
@@ -100,7 +91,7 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
             </div>
           ))}
         </div>
-        <p className="text-white/40 text-sm mt-6 animate-pulse">Waiting for host to continue…</p>
+        <p className="text-white/40 text-sm mt-6 animate-pulse">Waiting for host to award the point…</p>
       </div>
     );
   }
@@ -182,6 +173,11 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
           <span className="text-xl font-black text-white">{round}</span>
           <span className="text-white/40 text-xs"> of {totalRounds}</span>
         </div>
+        {data.phase === "selecting" && typeof data.remainingMs === "number" && (
+          <div className={`mt-1 font-mono font-black ${data.remainingMs <= 5000 ? "text-red-400 animate-pulse" : "text-yellow-400"}`}>
+            {Math.max(0, Math.ceil(data.remainingMs / 1000))}s
+          </div>
+        )}
       </div>
 
       <p className="text-center text-white/60 text-sm mb-3 max-w-xs">
