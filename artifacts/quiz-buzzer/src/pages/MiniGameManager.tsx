@@ -148,11 +148,18 @@ export default function MiniGameManager() {
   };
   const saveFaceMerge = () => {
     setFmError("");
+    const payload = JSON.stringify(sets);
+    const sizeMB = payload.length / (1024 * 1024);
+    // Browser localStorage caps vary 5–10 MB per origin. Warn over 4 MB.
+    if (sizeMB > 4) {
+      setFmError(`Total size is ${sizeMB.toFixed(1)} MB — browsers cap localStorage at ~5 MB. Remove some sets or use smaller images, otherwise the save may fail silently.`);
+      return;
+    }
     try {
-      localStorage.setItem(FACE_MERGE_SETS_KEY, JSON.stringify(sets));
+      localStorage.setItem(FACE_MERGE_SETS_KEY, payload);
       localStorage.removeItem(OLD_FACE_MERGE_KEY);
       setFmSavedNotice(true);
-    } catch { setFmError("Couldn't save — total image size may be too large."); }
+    } catch { setFmError(`Couldn't save — browser storage full (~${sizeMB.toFixed(1)} MB attempted). Remove some sets or use smaller images.`); }
   };
   const clearFaceMerge = () => {
     if (!confirm("Clear all Face Merge sets?")) return;

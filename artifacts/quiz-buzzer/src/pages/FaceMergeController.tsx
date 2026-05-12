@@ -27,7 +27,7 @@ export default function FaceMergeController({ team, socket, sessionId, playerNam
     socket.on("game:face_merge_updated", handler);
     socket.on("game:buzzed", ({ state }: { state: GameState }) => {
       setGameState(state);
-      if (state.buzzedBy?.playerName === playerName) setBuzzSuccess(true);
+      if (state.buzzedBy?.playerId === socket.id) setBuzzSuccess(true);
     });
     socket.on("game:buzz_reset", (state: GameState) => {
       setGameState(state); setHasBuzzed(false); setBuzzSuccess(false);
@@ -61,7 +61,7 @@ export default function FaceMergeController({ team, socket, sessionId, playerNam
   const fmData = gameState.miniGameData as FaceMergeData | null;
   const phase = fmData?.phase ?? "guessing";
   const buzzedBy = gameState.buzzedBy;
-  const iAmBuzzer = buzzedBy?.playerName === playerName;
+  const iAmBuzzer = buzzedBy?.playerId === socket.id;
   const someoneElseBuzzed = !!buzzedBy && !iAmBuzzer;
   const setIndex = fmData?.setIndex ?? 0;
   const totalSets = fmData?.totalSets ?? 0;

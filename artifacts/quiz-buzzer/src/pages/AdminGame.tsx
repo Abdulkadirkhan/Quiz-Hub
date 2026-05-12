@@ -444,11 +444,16 @@ export default function AdminGame() {
                       {teamPlayers.length === 0 && (
                         <span className="text-[10px] text-gray-500 italic">scan to join →</span>
                       )}
-                      {teamPlayers.map((p, i) => (
+                      {teamPlayers.slice(0, 5).map((p, i) => (
                         <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 ${p.connected === false ? "bg-gray-300/40 text-gray-500 line-through" : "bg-gray-200/60 text-gray-700"}`} title={p.connected === false ? "Disconnected — they can rejoin via the QR" : ""}>
                           <span>{p.avatar}</span> {p.name}
                         </span>
                       ))}
+                      {teamPlayers.length > 5 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-300/30 text-gray-600 font-bold" title={teamPlayers.slice(5).map((p) => p.name).join(", ")}>
+                          +{teamPlayers.length - 5} more
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

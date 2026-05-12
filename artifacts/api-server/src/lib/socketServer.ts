@@ -74,6 +74,31 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     }
   };
 
+  // Broadcasts the public state with one twist: if face_merge images are present,
+  // they're stripped from the version sent to players (they don't render images,
+  // and we save substantial bandwidth — base64 images can be megabytes each).
+  // Admin and spectator (who are NOT in `players:` room) get the full state.
+  const broadcastSessionState = (sessionId: string, eventName: string, extra?: object) => {
+    const fullState = gameStore.getPublicState(sessionId);
+    const fullPayload = extra ? { ...extra, state: fullState } : fullState;
+    const isFaceMergeWithImages =
+      fullState.miniGameData &&
+      (fullState.miniGameData as { type: string }).type === "face_merge" &&
+      ((fullState.miniGameData as { image1?: string | null }).image1 ||
+       (fullState.miniGameData as { image2?: string | null }).image2 ||
+       (fullState.miniGameData as { merged?: string | null }).merged);
+    if (isFaceMergeWithImages) {
+      // Strip image bytes for player payload
+      const liteData = { ...(fullState.miniGameData as object), image1: null, image2: null, merged: null };
+      const liteState = { ...fullState, miniGameData: liteData };
+      const litePayload = extra ? { ...extra, state: liteState } : liteState;
+      io.to(`session:${sessionId}`).except(`players:${sessionId}`).emit(eventName, fullPayload);
+      io.to(`players:${sessionId}`).emit(eventName, litePayload);
+    } else {
+      io.to(`session:${sessionId}`).emit(eventName, fullPayload);
+    }
+  };
+
   io.on("connection", (socket: Socket) => {
     logger.info({ socketId: socket.id }, "Socket connected");
 
@@ -183,6 +208,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       }
       socket.join(`session:${data.sessionId}`);
       socket.join(`team:${data.sessionId}:${player.teamId}`);
+      socket.join(`players:${data.sessionId}`);
       const state = gameStore.getPublicState(data.sessionId);
       io.to(`session:${data.sessionId}`).emit("game:player_joined", state);
       if (typeof cb === "function") cb({ success: true, state });
@@ -246,8 +272,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
         startPacmanLoop(data.sessionId);
       }
 
-      const state = gameStore.getPublicState(data.sessionId);
-      io.to(`session:${data.sessionId}`).emit("game:minigame_started", state);
+      broadcastSessionState(data.sessionId, "game:minigame_started");
     });
 
     socket.on("admin:end_minigame", (data: { sessionId: string; winnerTeamId?: string }) => {
@@ -262,8 +287,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.faceMergeState = null;
       session.mysteryPuzzleState = null;
       session.pacmanState = null;
-      const state = gameStore.getPublicState(data.sessionId);
-      io.to(`session:${data.sessionId}`).emit("game:minigame_ended", state);
+      broadcastSessionState(data.sessionId, "game:minigame_ended");
     });
 
     socket.on("pacman:direction", (data: { sessionId: string; direction: string }) => {
@@ -281,6 +305,8 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       if (!session || session.status !== "minigame" || session.miniGameType !== "number_survival") return;
       const ns = session.numberSurvivalState;
       if (!ns || ns.phase !== "selecting") return;
+      // Bounds check — must be an integer in [1, numberRange]
+      if (typeof data.number !== "number" || !Number.isInteger(data.number) || data.number < 1 || data.number > ns.numberRange) return;
       const player = session.players.get(socket.id);
       if (!player || !ns.survivors.has(socket.id)) return;
       ns.roundSelections.set(socket.id, data.number);
@@ -324,22 +350,19 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       }));
       const ok = gameStore.setFaceMergeSets(data.sessionId, cleanSets);
       if (!ok) return;
-      const state = gameStore.getPublicState(data.sessionId);
-      io.to(`session:${data.sessionId}`).emit("game:face_merge_updated", state);
+      broadcastSessionState(data.sessionId, "game:face_merge_updated");
     });
 
     socket.on("admin:face_merge_next", (data: { sessionId: string }) => {
       const ok = gameStore.faceMergeNext(data.sessionId);
       if (!ok) return;
-      const state = gameStore.getPublicState(data.sessionId);
-      io.to(`session:${data.sessionId}`).emit("game:face_merge_updated", state);
+      broadcastSessionState(data.sessionId, "game:face_merge_updated");
     });
 
     socket.on("admin:face_merge_reveal", (data: { sessionId: string }) => {
       const ok = gameStore.revealFaceMerge(data.sessionId);
       if (!ok) return;
-      const state = gameStore.getPublicState(data.sessionId);
-      io.to(`session:${data.sessionId}`).emit("game:face_merge_updated", state);
+      broadcastSessionState(data.sessionId, "game:face_merge_updated");
     });
 
     socket.on("face_merge:buzz", (data: { sessionId: string }) => {

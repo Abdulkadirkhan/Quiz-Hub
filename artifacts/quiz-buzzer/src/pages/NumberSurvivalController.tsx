@@ -184,13 +184,13 @@ export default function NumberSurvivalController({ team, socket, sessionId, play
         Pick a number. If <span className="text-yellow-400 font-bold">a player on the OTHER team picks the same number</span>, you both get out. Same-team duplicates are safe.
       </p>
 
-      <div className="grid grid-cols-5 gap-2 max-w-xs">
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+      <div className={`grid gap-2 w-full max-w-md ${(data.numberRange ?? 10) <= 10 ? "grid-cols-5" : (data.numberRange ?? 10) <= 20 ? "grid-cols-5" : "grid-cols-6"}`}>
+        {Array.from({ length: data.numberRange ?? 10 }, (_, i) => i + 1).map((n) => (
           <button
             key={n}
             onClick={() => submitNumber(n)}
             disabled={submitted}
-            className={`aspect-square rounded-xl text-2xl font-black transition-all active:scale-95 ${
+            className={`aspect-square rounded-xl text-xl font-black transition-all active:scale-95 ${
               selected === n ? "bg-yellow-400 text-black" : submitted ? "bg-black/30 text-white/30" : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >

@@ -127,11 +127,16 @@ export default function SpectatorView() {
                 <div className={`text-4xl font-black ${colors.text}`}>{team.score}</div>
                 <div className="font-bold text-white mb-2">{team.name}</div>
                 <div className="flex flex-wrap justify-center gap-1">
-                  {teamPlayers.map((p, i) => (
+                  {teamPlayers.slice(0, 5).map((p, i) => (
                     <span key={i} className="text-xs bg-gray-800 px-2 py-0.5 rounded-full flex items-center gap-1">
                       <span>{p.avatar}</span> {p.name}
                     </span>
                   ))}
+                  {teamPlayers.length > 5 && (
+                    <span className="text-xs bg-gray-700 px-2 py-0.5 rounded-full text-gray-300 font-bold" title={teamPlayers.slice(5).map((p) => p.name).join(", ")}>
+                      +{teamPlayers.length - 5} more
+                    </span>
+                  )}
                 </div>
               </div>
             );

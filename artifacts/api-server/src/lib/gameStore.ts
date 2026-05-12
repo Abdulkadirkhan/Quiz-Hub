@@ -31,6 +31,7 @@ export interface NumberSurvivalState {
   roundSelections: Map<string, number>; survivors: Set<string>; history: RoundResult[];
   endsAt: number;  // timestamp when current selecting round auto-resolves
   durationSec: number;
+  numberRange: number;  // max pickable number (1..numberRange)
 }
 
 export interface FaceMergeSet {
@@ -153,6 +154,19 @@ class GameStore {
         // If they were the Mystery Puzzle solver, update solver mapping to the new socketId
         if (session.mysteryPuzzleState && session.mysteryPuzzleState.solverByTeam[updated.teamId] === oldSocketId) {
           session.mysteryPuzzleState.solverByTeam[updated.teamId] = socketId;
+        }
+        // Migrate Number Survival socket references — survivor set + current round selection
+        if (session.numberSurvivalState) {
+          const ns = session.numberSurvivalState;
+          if (ns.survivors.has(oldSocketId)) {
+            ns.survivors.delete(oldSocketId);
+            ns.survivors.add(socketId);
+          }
+          if (ns.roundSelections.has(oldSocketId)) {
+            const num = ns.roundSelections.get(oldSocketId)!;
+            ns.roundSelections.delete(oldSocketId);
+            ns.roundSelections.set(socketId, num);
+          }
         }
         logger.info({ sessionId, playerName: updated.name, teamId: updated.teamId }, "Player rejoined");
         return updated;
@@ -345,10 +359,20 @@ class GameStore {
     const allPlayerIds = new Set<string>();
     for (const [sid, p] of s.players) { if (p.connected) allPlayerIds.add(sid); }
     s.miniGameType = "number_survival";
+
+    // Scale number range so each player has plausible unique-number availability:
+    // 2× the largest team size, clamped to [10, 30].
+    let maxTeamSize = 0;
+    for (const team of s.teams) {
+      const count = [...s.players.values()].filter((p) => p.teamId === team.id && p.connected).length;
+      if (count > maxTeamSize) maxTeamSize = count;
+    }
+    const numberRange = Math.min(30, Math.max(10, maxTeamSize * 2));
+
     s.numberSurvivalState = {
       round: 1, totalRounds: 3, phase: "selecting",
       roundSelections: new Map(), survivors: allPlayerIds, history: [],
-      endsAt: Date.now() + durationSec * 1000, durationSec,
+      endsAt: Date.now() + durationSec * 1000, durationSec, numberRange,
     };
     return true;
   }
@@ -508,6 +532,8 @@ class GameStore {
       code: trimmed, correct, timestamp: Date.now(),
       playerName: player.name, teamId: player.teamId,
     });
+    // Cap to most-recent 20 to keep broadcast size bounded
+    if (mp.attempts.length > 20) mp.attempts.splice(0, mp.attempts.length - 20);
     if (correct) {
       mp.winnerTeamId = player.teamId;
       td.vaultUnlocked = true;
@@ -785,6 +811,7 @@ class GameStore {
         mySelections: mySelection, survivorIds: [...ns.survivors],
         remainingMs: ns.phase === "selecting" ? Math.max(0, ns.endsAt - Date.now()) : 0,
         durationSec: ns.durationSec,
+        numberRange: ns.numberRange,
       };
     } else if (s.miniGameType === "face_merge" && s.faceMergeState) {
       const fm = s.faceMergeState;

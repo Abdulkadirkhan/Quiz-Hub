@@ -41,7 +41,7 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
     });
     socket.on("game:buzzed", ({ state }: { state: GameState }) => {
       setGameState(state);
-      if (state.buzzedBy?.playerName === playerName) setBuzzSuccess(true);
+      if (state.buzzedBy?.playerId === socket.id) setBuzzSuccess(true);
       else { setLocked(true); setBuzzSuccess(false); }
     });
     socket.on("game:buzz_reset", (state: GameState) => {
@@ -105,7 +105,7 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
 
   const { status, currentQuestion, teams, buzzedBy, currentQuestionIndex, totalQuestions, miniGameType } = gameState;
   const myTeam = teams.find((t) => t.id === team.id);
-  const iAmBuzzer = buzzedBy?.playerName === playerName;
+  const iAmBuzzer = buzzedBy?.playerId === socket.id;
   const someoneElseBuzzed = !!buzzedBy && !iAmBuzzer;
   const canBuzz = (status === "question_active" || status === "buzzer_active") && !hasBuzzed && !locked;
   const commonProps = { team, socket, sessionId, playerName, avatar, gameState };

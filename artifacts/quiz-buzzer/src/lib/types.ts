@@ -20,6 +20,7 @@ export interface NumberSurvivalData {
   survivorIds: string[];
   remainingMs?: number;
   durationSec?: number;
+  numberRange?: number;
 }
 
 export interface FaceMergeData {
