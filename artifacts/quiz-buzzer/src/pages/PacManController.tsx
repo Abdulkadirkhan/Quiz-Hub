@@ -70,7 +70,7 @@ export default function PacManController({ team, socket, sessionId, playerName, 
       if (sc > best) { best = sc; winner = tid; tied = false; }
       else if (sc === best) tied = true;
     }
-    if (tied) { outcomeLabel = "Tie!"; outcomeColor = "#facc15"; }
+    if (tied) { outcomeLabel = "Round complete"; outcomeColor = "#facc15"; }
     else if (winner === team.id) { outcomeLabel = "Round Won!"; outcomeColor = "#4ade80"; }
     else { outcomeLabel = "Round Lost"; outcomeColor = "#f87171"; }
   }

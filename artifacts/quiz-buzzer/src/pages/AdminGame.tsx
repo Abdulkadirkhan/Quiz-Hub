@@ -180,9 +180,13 @@ export default function AdminGame() {
     setMiniGameActive(false);
     if (!gameState) return;
     const winnerTeam = gameState.teams.find((t) => t.id === winnerTeamId);
-    setMiniGameResult({ winnerTeamId, label: winnerTeam ? `${winnerTeam.name} wins!` : "It's a tie!" });
+    if (winnerTeam) {
+      setMiniGameResult({ winnerTeamId, label: `${winnerTeam.name} wins!` });
+      playVictorySound();
+    } else {
+      setMiniGameResult({ winnerTeamId: undefined, label: "Round complete" });
+    }
     emit("admin:end_minigame", { winnerTeamId });
-    if (winnerTeamId) playVictorySound();
   }, [gameState, emit]);
 
   const handlePacManEnd = useCallback((result: MiniGameResult) => {
@@ -488,7 +492,7 @@ export default function AdminGame() {
 
         {miniGameResult && !miniGameActive && (
           <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-purple-600 text-center">
-            <div className="text-4xl mb-2">{miniGameResult.winnerTeamId ? "🏆" : "🤝"}</div>
+            <div className="text-4xl mb-2">{miniGameResult.winnerTeamId ? "🏆" : "🏁"}</div>
             <h3 className="text-2xl font-black text-white mb-1">{miniGameResult.label}</h3>
             {miniGameResult.winnerTeamId && <p className="text-yellow-400 text-sm font-bold mt-1">+1 Point Awarded!</p>}
           </div>
@@ -546,16 +550,15 @@ export default function AdminGame() {
 
           {status === "finished" && (
             <div className="text-center py-8">
-              <h2 className="text-4xl font-black text-yellow-400 mb-4">Game Over!</h2>
-              <div className="flex justify-center gap-8 mb-6">
-                {[...teams].sort((a, b) => b.score - a.score).map((team, i) => {
+              <h2 className="text-4xl font-black text-yellow-400 mb-2">Game Over</h2>
+              <p className="text-gray-500 text-sm mb-6">Final scores — announce the winner yourself</p>
+              <div className="flex justify-center gap-8 mb-6 flex-wrap">
+                {teams.map((team) => {
                   const colors = getTeamColors(team.color);
                   return (
-                    <div key={team.id} className={`text-center ${i === 0 ? "scale-110" : ""}`}>
-                      {i === 0 && <div className="text-4xl mb-1">🏆</div>}
-                      <div className={`text-3xl font-black ${colors.text}`}>{team.score}</div>
-                      <div className="font-bold text-white">{team.name}</div>
-                      {i === 0 && <div className="text-yellow-400 text-sm font-bold mt-1">WINNER!</div>}
+                    <div key={team.id} className="text-center">
+                      <div className={`text-4xl font-black ${colors.text}`}>{team.score}</div>
+                      <div className="font-bold text-white mt-1">{team.name}</div>
                     </div>
                   );
                 })}

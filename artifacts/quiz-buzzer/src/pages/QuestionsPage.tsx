@@ -162,24 +162,44 @@ export default function QuestionsPage() {
                       placeholder="Question text"
                       autoFocus
                     />
-                    <div className="grid grid-cols-2 gap-2">
-                      {LABEL_OPTIONS.map((label, i) => (
-                        <div key={label} className="flex items-center gap-2">
-                          <span className="text-yellow-400 font-black text-sm w-4">{label}</span>
-                          <input
-                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-400"
-                            value={(editBuf.choices || [])[i]?.text || ""}
-                            onChange={(e) => {
-                              const choices = [...(editBuf.choices || [])];
-                              while (choices.length <= i) choices.push({ label: LABEL_OPTIONS[choices.length], text: "" });
-                              choices[i] = { label, text: e.target.value };
-                              setEditBuf({ ...editBuf, choices });
-                            }}
-                            placeholder={`Option ${label}`}
-                          />
-                        </div>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`openended-${editBuf.id}`}
+                        checked={!editBuf.choices || editBuf.choices.length === 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditBuf({ ...editBuf, choices: undefined });
+                          } else {
+                            setEditBuf({ ...editBuf, choices: [{ label: "A", text: "" }, { label: "B", text: "" }, { label: "C", text: "" }, { label: "D", text: "" }] });
+                          }
+                        }}
+                        className="w-4 h-4 accent-yellow-400"
+                      />
+                      <label htmlFor={`openended-${editBuf.id}`} className="text-sm text-gray-300 cursor-pointer select-none">
+                        Open-ended question <span className="text-gray-500">(no options shown — teams buzz to answer)</span>
+                      </label>
                     </div>
+                    {editBuf.choices && editBuf.choices.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {LABEL_OPTIONS.map((label, i) => (
+                          <div key={label} className="flex items-center gap-2">
+                            <span className="text-yellow-400 font-black text-sm w-4">{label}</span>
+                            <input
+                              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-400"
+                              value={(editBuf.choices || [])[i]?.text || ""}
+                              onChange={(e) => {
+                                const choices = [...(editBuf.choices || [])];
+                                while (choices.length <= i) choices.push({ label: LABEL_OPTIONS[choices.length], text: "" });
+                                choices[i] = { label, text: e.target.value };
+                                setEditBuf({ ...editBuf, choices });
+                              }}
+                              placeholder={`Option ${label}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center gap-3">
                       <label className="text-xs text-gray-400 font-semibold">Time Limit</label>
                       <select
@@ -204,12 +224,14 @@ export default function QuestionsPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-bold text-sm leading-snug">{q.text || <span className="text-gray-600 italic">No question text</span>}</p>
-                      {q.choices && (
+                      {q.choices && q.choices.length > 0 ? (
                         <div className="grid grid-cols-2 gap-1 mt-2">
                           {q.choices.map((c) => (
                             <span key={c.label} className="text-xs text-gray-500">{c.label}: {c.text}</span>
                           ))}
                         </div>
+                      ) : (
+                        <span className="inline-block text-xs text-orange-400 font-bold mt-1">🔔 Open-ended — teams buzz to answer</span>
                       )}
                       <p className="text-xs text-gray-600 mt-1">⏱ {q.timeLimit || 30}s</p>
                     </div>

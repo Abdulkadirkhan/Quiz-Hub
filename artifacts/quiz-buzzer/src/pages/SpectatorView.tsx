@@ -119,12 +119,11 @@ export default function SpectatorView() {
         </div>
 
         <div className={`grid gap-4 mb-6 ${teams.length <= 2 ? "grid-cols-2" : teams.length === 3 ? "grid-cols-3" : "grid-cols-2 md:grid-cols-4"}`}>
-          {sortedTeams.map((team, rank) => {
+          {sortedTeams.map((team) => {
             const colors = getTeamColors(team.color);
             const teamPlayers = players[team.id] || [];
             return (
               <div key={team.id} className={`rounded-2xl p-4 border-2 text-center ${colors.border} bg-gray-900`}>
-                {rank === 0 && status !== "lobby" && <div className="text-xl mb-1">👑</div>}
                 <div className={`text-4xl font-black ${colors.text}`}>{team.score}</div>
                 <div className="font-bold text-white mb-2">{team.name}</div>
                 <div className="flex flex-wrap justify-center gap-1">
@@ -405,12 +404,21 @@ export default function SpectatorView() {
         )}
 
         {status === "finished" && (
-          <div className="bg-gray-900 rounded-2xl p-8 text-center border border-yellow-800">
-            <div className="text-5xl mb-3">🏆</div>
-            <h2 className="text-3xl font-black text-yellow-400 mb-3">Game Over!</h2>
-            {sortedTeams[0] && (
-              <p className="text-xl text-white font-bold">{sortedTeams[0].name} wins with {sortedTeams[0].score} points!</p>
-            )}
+          <div className="bg-gray-900 rounded-2xl p-8 text-center border border-gray-800">
+            <div className="text-5xl mb-3">🏁</div>
+            <h2 className="text-3xl font-black text-yellow-400 mb-4">Game Over</h2>
+            <div className="flex justify-center gap-6 flex-wrap">
+              {teams.map((team) => {
+                const colors = getTeamColors(team.color);
+                return (
+                  <div key={team.id} className="text-center">
+                    <div className={`text-4xl font-black ${colors.text}`}>{team.score}</div>
+                    <div className="text-white font-bold mt-1">{team.name}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-gray-500 text-sm mt-4">Final scores — host announces the winner</p>
           </div>
         )}
       </div>
