@@ -157,6 +157,8 @@ export default function AdminGame() {
     socket.on("game:face_merge_updated", onState);
     socket.on("game:mystery_updated", onState);
     socket.on("game:pacman_tick", onState);
+    socket.on("game:spot_diff_updated", onState);
+    socket.on("game:memory_stars_updated", onState);
 
     return () => {
       socket.off("game:question"); socket.off("game:buzzed"); socket.off("game:score_update");
@@ -168,6 +170,7 @@ export default function AdminGame() {
       socket.off("game:number_next_round", onState); socket.off("game:number_done", onState);
       socket.off("game:face_merge_updated", onState); socket.off("game:mystery_updated", onState);
       socket.off("game:pacman_tick", onState);
+      socket.off("game:spot_diff_updated", onState); socket.off("game:memory_stars_updated", onState);
       stopTimer();
     };
   }, [sessionId]);

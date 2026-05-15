@@ -68,6 +68,8 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
     socket.on("game:number_done", onState);
     socket.on("game:face_merge_updated", onState);
     socket.on("game:mystery_updated", onState);
+    socket.on("game:spot_diff_updated", onState);
+    socket.on("game:memory_stars_updated", onState);
 
     return () => {
       socket.off("game:question"); socket.off("game:buzzed"); socket.off("game:buzz_reset");
@@ -78,6 +80,7 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
       socket.off("game:number_update", onState); socket.off("game:number_result", onState);
       socket.off("game:number_next_round", onState); socket.off("game:number_done", onState);
       socket.off("game:face_merge_updated", onState); socket.off("game:mystery_updated", onState);
+      socket.off("game:spot_diff_updated", onState); socket.off("game:memory_stars_updated", onState);
     };
   }, [socket, playerName]);
 

@@ -46,6 +46,8 @@ export default function SpectatorView() {
     socket.on("game:mystery_updated", onState);
     socket.on("game:buzzer_opened", onState);
     socket.on("game:buzzer_closed", onState);
+    socket.on("game:spot_diff_updated", onState);
+    socket.on("game:memory_stars_updated", onState);
 
     return () => {
       socket.off("game:started", onState);
@@ -68,6 +70,8 @@ export default function SpectatorView() {
       socket.off("game:mystery_updated", onState);
       socket.off("game:buzzer_opened", onState);
       socket.off("game:buzzer_closed", onState);
+      socket.off("game:spot_diff_updated", onState);
+      socket.off("game:memory_stars_updated", onState);
     };
   }, [sessionId]);
 
