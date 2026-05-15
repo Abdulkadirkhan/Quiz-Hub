@@ -3,7 +3,8 @@ import { MiniGameType, MysteryPuzzleClue } from "@/lib/types";
 
 export type MiniGameStartData =
   | { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[] }> }
-  | { images: string[] };
+  | { images: string[] }
+  | { sequences: Array<{ text: string; durationMs: number }> };
 
 interface Props {
   teams: { id: string }[];
@@ -14,6 +15,7 @@ interface Props {
 
 const MYSTERY_KEY_V2 = "quiz_minigames_mystery_puzzle_v2";
 const SPOT_DIFF_KEY = "quiz_minigames_spot_difference";
+const MEMORY_STARS_KEY = "quiz_minigames_memory_stars";
 
 interface SavedV2 {
   teamA: { story: string; clues: Array<{ question: string; digit: string }> };
@@ -21,6 +23,7 @@ interface SavedV2 {
 }
 
 interface SavedSpotDiff { id: string; image: string | null; }
+interface SavedMemoryStars { id: string; text: string; durationMs: number; }
 
 function loadSavedV2(): SavedV2 | null {
   try {
@@ -41,11 +44,23 @@ function loadSavedSpotDiff(): SavedSpotDiff[] {
   return [];
 }
 
+function loadSavedMemoryStars(): SavedMemoryStars[] {
+  try {
+    const raw = localStorage.getItem(MEMORY_STARS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
 const GAMES = [
   { type: "number_survival" as MiniGameType, icon: "🔢", name: "Number Survival", desc: "Pick a unique number 1–10 (vs the other team) or get eliminated. 30s per round, 3 rounds.", color: "bg-orange-950 border-orange-700 hover:border-orange-400" },
   { type: "face_merge" as MiniGameType, icon: "🖼️", name: "Face Merge", desc: "Multiple image sets — race through them. Pre-load in Manage Mini-Games.", color: "bg-pink-950 border-pink-700 hover:border-pink-400" },
   { type: "mystery_puzzle" as MiniGameType, icon: "🔐", name: "Mystery Puzzle", desc: "Split-screen vault crack. Each team gets their own 4 clues — solve them, then figure out the unlock order.", color: "bg-amber-950 border-amber-700 hover:border-amber-400" },
   { type: "spot_difference" as MiniGameType, icon: "🔍", name: "Spot the Difference", desc: "Show a combined image, audience yells the difference, host awards. No phones needed.", color: "bg-teal-950 border-teal-700 hover:border-teal-400" },
+  { type: "memory_stars" as MiniGameType, icon: "🌟", name: "Memory Stars", desc: "Show 8 chars for a few seconds, then they flip to stars. Teams guess the exact sequence.", color: "bg-indigo-950 border-indigo-700 hover:border-indigo-400" },
 ];
 
 export default function MiniGameSelector({ teams, connectedPlayerCount, onSelect, onClose }: Props) {
@@ -101,6 +116,20 @@ export default function MiniGameSelector({ teams, connectedPlayerCount, onSelect
     onSelect("spot_difference", { images });
   };
 
+  const [memoryStarsError, setMemoryStarsError] = useState("");
+  const handleMemoryStarsClick = () => {
+    setMemoryStarsError("");
+    const saved = loadSavedMemoryStars();
+    const sequences = saved
+      .filter((s) => s.text && s.text.length === 8)
+      .map((s) => ({ text: s.text, durationMs: s.durationMs || 5000 }));
+    if (sequences.length === 0) {
+      setMemoryStarsError("No Memory Stars sequences saved. Open Manage Mini-Games to add some.");
+      return;
+    }
+    onSelect("memory_stars", { sequences });
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
       <div className="w-full max-w-2xl bg-gray-900 rounded-2xl p-6 border border-gray-700 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -116,7 +145,7 @@ export default function MiniGameSelector({ teams, connectedPlayerCount, onSelect
         )}
         {noPlayers && (
           <div className="bg-blue-950/40 border border-blue-700 rounded-lg p-2 text-center text-xs text-blue-300 mb-3">
-            🎤 <span className="font-bold">Host-only mode</span> — no player phones. Number Survival needs phones. Face Merge, Mystery Puzzle (host keypad), and Spot the Difference work fine.
+            🎤 <span className="font-bold">Host-only mode</span> — no player phones. Number Survival needs phones. Face Merge, Mystery Puzzle (host keypad), Spot the Difference, and Memory Stars work fine.
           </div>
         )}
         {mysteryError && (
@@ -127,6 +156,11 @@ export default function MiniGameSelector({ teams, connectedPlayerCount, onSelect
         {spotDiffError && (
           <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-3">
             {spotDiffError}
+          </div>
+        )}
+        {memoryStarsError && (
+          <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-3">
+            {memoryStarsError}
           </div>
         )}
 
@@ -141,6 +175,7 @@ export default function MiniGameSelector({ teams, connectedPlayerCount, onSelect
                   if (disabled) return;
                   if (game.type === "mystery_puzzle") handleMysteryClick();
                   else if (game.type === "spot_difference") handleSpotDiffClick();
+                  else if (game.type === "memory_stars") handleMemoryStarsClick();
                   else onSelect(game.type);
                 }}
                 disabled={disabled}

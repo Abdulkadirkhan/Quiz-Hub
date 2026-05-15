@@ -9,6 +9,7 @@ import NumberSurvivalGame from "./NumberSurvivalGame";
 import FaceMergeGame from "./FaceMergeGame";
 import MysteryPuzzleGame from "./MysteryPuzzleGame";
 import SpotDifferenceGame from "./SpotDifferenceGame";
+import MemoryStarsGame from "./MemoryStarsGame";
 import MiniGameSelector from "./MiniGameSelector";
 import { loadSequence, SequenceItem } from "./SequenceManager";
 
@@ -47,6 +48,20 @@ function loadSavedSpotDiffImages(): string[] {
     const parsed = JSON.parse(raw) as Array<{ image: string | null }>;
     if (!Array.isArray(parsed)) return [];
     return parsed.map((s) => s.image).filter((img): img is string => !!img);
+  } catch {
+    return [];
+  }
+}
+
+function loadSavedMemoryStars(): Array<{ text: string; durationMs: number }> {
+  try {
+    const raw = localStorage.getItem("quiz_minigames_memory_stars");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Array<{ text: string; durationMs: number }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((s) => s && typeof s.text === "string" && s.text.length === 8)
+      .map((s) => ({ text: s.text, durationMs: s.durationMs || 5000 }));
   } catch {
     return [];
   }
@@ -188,11 +203,13 @@ export default function AdminGame() {
     } catch {}
   };
 
-  const handleSelectMiniGame = (type: MiniGameType, data?: { teamPuzzles?: Record<string, { story: string; clues: MysteryPuzzleClue[] }>; images?: string[] }) => {
+  const handleSelectMiniGame = (type: MiniGameType, data?: { teamPuzzles?: Record<string, { story: string; clues: MysteryPuzzleClue[] }>; images?: string[]; sequences?: Array<{ text: string; durationMs: number }> }) => {
     setShowSelector(false);
     if (!type) return;
     if (type === "spot_difference") {
       emit("admin:start_minigame", { type, images: data?.images });
+    } else if (type === "memory_stars") {
+      emit("admin:start_minigame", { type, sequences: data?.sequences });
     } else if (data && "teamPuzzles" in data) {
       emit("admin:start_minigame", { type, puzzleData: { teamPuzzles: data.teamPuzzles } });
     } else {
@@ -260,6 +277,13 @@ export default function AdminGame() {
           return;
         }
         emit("admin:start_minigame", { type: "spot_difference", images });
+      } else if (item.minigameType === "memory_stars") {
+        const sequences = loadSavedMemoryStars();
+        if (sequences.length === 0) {
+          alert("No Memory Stars sequences are saved. Open Manage Mini-Games first.");
+          return;
+        }
+        emit("admin:start_minigame", { type: "memory_stars", sequences });
       } else {
         emit("admin:start_minigame", { type: item.minigameType });
       }
@@ -288,6 +312,7 @@ export default function AdminGame() {
     face_merge: "🖼️ FACE MERGE",
     mystery_puzzle: "🔐 MYSTERY PUZZLE",
     spot_difference: "🔍 SPOT THE DIFFERENCE",
+    memory_stars: "🌟 MEMORY STARS",
   };
 
   return (
@@ -536,6 +561,9 @@ export default function AdminGame() {
             )}
             {miniGameType === "spot_difference" && (
               <SpotDifferenceGame key={miniGameKey} teams={teams} socket={socketRef.current} sessionId={sessionId} gameState={gameState} onEnd={handleMiniGameEnd} />
+            )}
+            {miniGameType === "memory_stars" && (
+              <MemoryStarsGame key={miniGameKey} teams={teams} socket={socketRef.current} sessionId={sessionId} gameState={gameState} onEnd={handleMiniGameEnd} />
             )}
           </div>
         )}

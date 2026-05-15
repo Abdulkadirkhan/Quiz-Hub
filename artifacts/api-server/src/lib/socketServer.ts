@@ -77,6 +77,30 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
     }
   };
 
+  // Memory Stars auto-hide timers — flip phase from "showing" to "hidden" after a delay
+  const memoryStarsTimers = new Map<string, NodeJS.Timeout>();
+  const stopMemoryStarsTimer = (sessionId: string) => {
+    const existing = memoryStarsTimers.get(sessionId);
+    if (existing) {
+      clearTimeout(existing);
+      memoryStarsTimers.delete(sessionId);
+    }
+  };
+  const startMemoryStarsTimer = (sessionId: string, delayMs: number) => {
+    stopMemoryStarsTimer(sessionId);
+    const id = setTimeout(() => {
+      memoryStarsTimers.delete(sessionId);
+      const session = gameStore.getSession(sessionId);
+      if (!session || session.miniGameType !== "memory_stars") return;
+      const ms = session.memoryStarsState;
+      // Only flip if we're still in "showing" — admin may have already moved past it
+      if (!ms || ms.phase !== "showing") return;
+      gameStore.memoryStarsHide(sessionId);
+      broadcastSessionState(sessionId, "game:memory_stars_updated");
+    }, delayMs);
+    memoryStarsTimers.set(sessionId, id);
+  };
+
   // Broadcasts the public state with one twist: if face_merge images are present,
   // they're stripped from the version sent to players (they don't render images,
   // and we save substantial bandwidth — base64 images can be megabytes each).
@@ -252,7 +276,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       if (typeof cb === "function") cb({ state });
     });
 
-    socket.on("admin:start_minigame", (data: { sessionId: string; type: string; puzzleData?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }> }; images?: string[] }) => {
+    socket.on("admin:start_minigame", (data: { sessionId: string; type: string; puzzleData?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }> }; images?: string[]; sequences?: Array<{ text: string; durationMs: number }> }) => {
       const session = gameStore.getSession(data.sessionId);
       if (!session) return;
       session.status = "minigame";
@@ -262,8 +286,10 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.mysteryPuzzleState = null;
       session.pacmanState = null;
       session.spotDifferenceState = null;
+      session.memoryStarsState = null;
       stopPacmanLoop(data.sessionId);
       stopNumberSurvivalLoop(data.sessionId);
+      stopMemoryStarsTimer(data.sessionId);
 
       if (data.type === "number_survival") {
         gameStore.initNumberSurvival(data.sessionId);
@@ -280,6 +306,11 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
         if (Array.isArray(data.images) && data.images.length > 0) {
           gameStore.setSpotDifferenceImages(data.sessionId, data.images);
         }
+      } else if (data.type === "memory_stars") {
+        gameStore.initMemoryStars(data.sessionId);
+        if (Array.isArray(data.sequences) && data.sequences.length > 0) {
+          gameStore.setMemoryStarsSequences(data.sessionId, data.sequences);
+        }
       }
 
       broadcastSessionState(data.sessionId, "game:minigame_started");
@@ -290,6 +321,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       if (!session) return;
       stopPacmanLoop(data.sessionId);
       stopNumberSurvivalLoop(data.sessionId);
+      stopMemoryStarsTimer(data.sessionId);
       if (data.winnerTeamId) gameStore.awardPoint(data.sessionId, data.winnerTeamId);
       session.status = "round_end";
       session.miniGameType = null;
@@ -298,6 +330,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.mysteryPuzzleState = null;
       session.pacmanState = null;
       session.spotDifferenceState = null;
+      session.memoryStarsState = null;
       broadcastSessionState(data.sessionId, "game:minigame_ended");
     });
 
@@ -318,6 +351,56 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       const ok = gameStore.spotDifferenceGoto(data.sessionId, data.index);
       if (!ok) return;
       broadcastSessionState(data.sessionId, "game:spot_diff_updated");
+    });
+
+    // ===== Memory Stars =====
+    // Auto-hide timers per session (so showing→hidden transition is server-driven)
+    socket.on("admin:memory_stars_setup", (data: { sessionId: string; sequences: Array<{ text: string; durationMs: number }> }) => {
+      const ok = gameStore.setMemoryStarsSequences(data.sessionId, data.sequences);
+      if (!ok) return;
+      stopMemoryStarsTimer(data.sessionId);
+      broadcastSessionState(data.sessionId, "game:memory_stars_updated");
+    });
+
+    socket.on("admin:memory_stars_show", (data: { sessionId: string }) => {
+      const ok = gameStore.memoryStarsShow(data.sessionId);
+      if (!ok) return;
+      // Schedule auto-hide based on the now-current sequence
+      const session = gameStore.getSession(data.sessionId);
+      const ms = session?.memoryStarsState;
+      if (ms && ms.showEndsAt) {
+        const delay = Math.max(0, ms.showEndsAt - Date.now());
+        startMemoryStarsTimer(data.sessionId, delay);
+      }
+      broadcastSessionState(data.sessionId, "game:memory_stars_updated");
+    });
+
+    socket.on("admin:memory_stars_hide", (data: { sessionId: string }) => {
+      stopMemoryStarsTimer(data.sessionId);
+      const ok = gameStore.memoryStarsHide(data.sessionId);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:memory_stars_updated");
+    });
+
+    socket.on("admin:memory_stars_reveal", (data: { sessionId: string }) => {
+      stopMemoryStarsTimer(data.sessionId);
+      const ok = gameStore.memoryStarsReveal(data.sessionId);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:memory_stars_updated");
+    });
+
+    socket.on("admin:memory_stars_next", (data: { sessionId: string }) => {
+      stopMemoryStarsTimer(data.sessionId);
+      const ok = gameStore.memoryStarsNext(data.sessionId);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:memory_stars_updated");
+    });
+
+    socket.on("admin:memory_stars_goto", (data: { sessionId: string; index: number }) => {
+      stopMemoryStarsTimer(data.sessionId);
+      const ok = gameStore.memoryStarsGoto(data.sessionId, data.index);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:memory_stars_updated");
     });
 
     socket.on("pacman:direction", (data: { sessionId: string; direction: string }) => {

@@ -146,6 +146,37 @@ export default function PlayerBuzzer({ sessionId, playerName, avatar, team, game
         </div>
       );
     }
+    if (miniGameType === "memory_stars") {
+      return (
+        <div className="min-h-screen flex flex-col" style={{ backgroundColor: teamBg }}>
+          <div className="px-4 pt-4 pb-2">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{avatar}</span>
+                <div>
+                  <p className="text-white/50 text-xs">Playing as</p>
+                  <p className="font-black text-white text-base leading-tight">{playerName}</p>
+                </div>
+              </div>
+              <div className="px-3 py-1 rounded-full text-sm font-bold" style={{ backgroundColor: teamFg, color: teamBg }}>{team.name}</div>
+            </div>
+            <div className="flex gap-2">
+              {teams.map((t) => (
+                <div key={t.id} className={`flex-1 rounded-lg px-2 py-1.5 text-center ${t.id === team.id ? "border border-white/30" : ""}`} style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
+                  <div className="text-xl font-black text-white">{t.score}</div>
+                  <div className="text-xs text-white/50">{t.name}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-4">
+            <div className="text-7xl">🌟</div>
+            <h2 className="text-2xl font-black text-white">Look at the big screen!</h2>
+            <p className="text-white/70 max-w-xs">Memorize the 8 characters before they turn into stars. Your team yells out the answer when the host asks.</p>
+          </div>
+        </div>
+      );
+    }
   }
 
   if (status === "finished") {

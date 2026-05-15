@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRoute } from "wouter";
 import { getSocket } from "@/lib/socket";
-import { GameState, FaceMergeData, NumberSurvivalData, MysteryPuzzleData, SpotDifferenceData } from "@/lib/types";
+import { GameState, FaceMergeData, NumberSurvivalData, MysteryPuzzleData, SpotDifferenceData, MemoryStarsData } from "@/lib/types";
 import { getTeamColors } from "@/lib/teamColors";
 
 export default function SpectatorView() {
@@ -105,6 +105,7 @@ export default function SpectatorView() {
   const nsData = miniGameType === "number_survival" ? (miniGameData as NumberSurvivalData | null) : null;
   const mpData = miniGameType === "mystery_puzzle" ? (miniGameData as MysteryPuzzleData | null) : null;
   const sdData = miniGameType === "spot_difference" ? (miniGameData as SpotDifferenceData | null) : null;
+  const msData = miniGameType === "memory_stars" ? (miniGameData as MemoryStarsData | null) : null;
 
   const isMiniGame = status === "minigame" && miniGameType;
 
@@ -379,6 +380,46 @@ export default function SpectatorView() {
               <p className="text-gray-500 italic text-center py-8">No image to display.</p>
             )}
             <p className="text-center text-xs text-gray-500 mt-2">Find the difference between the two sides!</p>
+          </div>
+        )}
+
+        {isMiniGame && miniGameType === "memory_stars" && msData && (
+          <div className="bg-gray-900 rounded-2xl p-6 mb-6 border-2 border-indigo-700">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h2 className="text-xl font-black text-indigo-300">🌟 Memory Stars</h2>
+              <p className="text-indigo-200 text-sm font-bold">Sequence {msData.index + 1} of {msData.total}</p>
+            </div>
+            <div className={`flex flex-col items-center justify-center rounded-xl py-10 px-4 ${
+              msData.phase === "showing" ? "bg-indigo-950/40" :
+              msData.phase === "hidden" ? "bg-purple-950/40" :
+              msData.phase === "revealed" ? "bg-green-950/40" :
+              "bg-gray-800/40"
+            }`}>
+              {msData.phase === "idle" && (
+                <p className="text-gray-500 text-xl italic">Get ready…</p>
+              )}
+              {msData.phase !== "idle" && (
+                <div
+                  className="font-mono font-black tracking-widest text-center"
+                  style={{
+                    fontSize: "clamp(3rem, 14vw, 9rem)",
+                    color: msData.phase === "hidden" ? "#c4b5fd" : msData.phase === "revealed" ? "#86efac" : "#c7d2fe",
+                    letterSpacing: "0.15em",
+                  }}
+                >
+                  {msData.display}
+                </div>
+              )}
+              {msData.phase === "showing" && (
+                <p className="text-indigo-300 mt-4 text-base font-bold">Memorize it!</p>
+              )}
+              {msData.phase === "hidden" && (
+                <p className="text-purple-300 mt-4 text-base font-bold">What was the sequence?</p>
+              )}
+              {msData.phase === "revealed" && (
+                <p className="text-green-300 mt-4 text-base font-bold">✓ Revealed</p>
+              )}
+            </div>
           </div>
         )}
 

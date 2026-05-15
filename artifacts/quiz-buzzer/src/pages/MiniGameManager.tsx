@@ -2,6 +2,23 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { resizeImageFile } from "@/lib/imageUtils";
 
+// ====================== MEMORY STARS ======================
+
+interface MemoryStarsSeqDraft { id: string; text: string; durationMs: number; }
+
+const MEMORY_STARS_KEY = "quiz_minigames_memory_stars";
+
+function loadMemoryStarsSeqs(): MemoryStarsSeqDraft[] {
+  try {
+    const raw = localStorage.getItem(MEMORY_STARS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
 // ====================== SPOT THE DIFFERENCE ======================
 
 interface SpotDiffImage { id: string; image: string | null; }
@@ -126,6 +143,12 @@ export default function MiniGameManager() {
   const [sdError, setSdError] = useState("");
   const [sdPersistedCount, setSdPersistedCount] = useState<number>(() => loadSpotDiffImages().length);
 
+  // Memory Stars state
+  const [memSeqs, setMemSeqs] = useState<MemoryStarsSeqDraft[]>(loadMemoryStarsSeqs);
+  const [msSavedNotice, setMsSavedNotice] = useState(false);
+  const [msError, setMsError] = useState("");
+  const [msPersistedCount, setMsPersistedCount] = useState<number>(() => loadMemoryStarsSeqs().length);
+
   useEffect(() => {
     if (!fmSavedNotice) return;
     const t = setTimeout(() => setFmSavedNotice(false), 2000);
@@ -141,6 +164,11 @@ export default function MiniGameManager() {
     const t = setTimeout(() => setSdSavedNotice(false), 2000);
     return () => clearTimeout(t);
   }, [sdSavedNotice]);
+  useEffect(() => {
+    if (!msSavedNotice) return;
+    const t = setTimeout(() => setMsSavedNotice(false), 2000);
+    return () => clearTimeout(t);
+  }, [msSavedNotice]);
 
   // ---------- Face Merge handlers ----------
 
@@ -233,6 +261,56 @@ export default function MiniGameManager() {
     localStorage.removeItem(SPOT_DIFF_KEY);
     setSpotImages([]);
     setSdPersistedCount(0);
+  };
+
+  // ---------- Memory Stars handlers ----------
+  const addMemSeq = () => setMemSeqs((prev) => [...prev, { id: newId(), text: "", durationMs: 5000 }]);
+  const removeMemSeq = (id: string) => setMemSeqs((prev) => prev.filter((s) => s.id !== id));
+  const updateMemSeq = (id: string, patch: Partial<MemoryStarsSeqDraft>) => {
+    setMemSeqs((prev) => prev.map((s) => s.id === id ? { ...s, ...patch } : s));
+  };
+  const moveMemSeq = (idx: number, dir: -1 | 1) => {
+    setMemSeqs((prev) => {
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+  const saveMemoryStars = () => {
+    setMsError("");
+    // Sanitize: strip whitespace, trim/pad to 8 chars max, force uppercase for letters
+    const cleaned = memSeqs.map((s) => ({
+      id: s.id,
+      text: (s.text || "").replace(/\s/g, "").slice(0, 8).toUpperCase(),
+      durationMs: Math.max(1000, Math.min(30000, s.durationMs || 5000)),
+    }));
+    // Validate: all 8 chars long
+    const tooShort = cleaned.find((s) => s.text.length > 0 && s.text.length < 8);
+    if (tooShort) {
+      setMsError(`A sequence is only ${tooShort.text.length} characters — each must be exactly 8.`);
+      return;
+    }
+    const valid = cleaned.filter((s) => s.text.length === 8);
+    if (valid.length === 0) {
+      setMsError("Add at least one full 8-character sequence.");
+      return;
+    }
+    try {
+      localStorage.setItem(MEMORY_STARS_KEY, JSON.stringify(valid));
+      setMemSeqs(cleaned); // reflect cleaned values back to UI
+      setMsSavedNotice(true);
+      setMsPersistedCount(valid.length);
+    } catch {
+      setMsError("Couldn't save — browser storage issue.");
+    }
+  };
+  const clearMemoryStars = () => {
+    if (!confirm("Clear all Memory Stars sequences?")) return;
+    localStorage.removeItem(MEMORY_STARS_KEY);
+    setMemSeqs([]);
+    setMsPersistedCount(0);
   };
 
   // ---------- Mystery Puzzle handlers ----------
@@ -486,6 +564,72 @@ export default function MiniGameManager() {
             <button onClick={addSpotImage} className="w-full py-2 bg-teal-700/40 hover:bg-teal-700/70 text-teal-200 rounded-lg font-bold text-sm transition">+ Add image</button>
           </div>
           <p className="text-xs text-gray-600 text-center mt-4">{spotImages.length} {spotImages.length === 1 ? "image" : "images"} • Auto-resized to 1280px wide for clarity</p>
+        </div>
+
+        {/* MEMORY STARS */}
+        <div className="bg-gray-900 rounded-2xl p-6 border-2 border-indigo-700 mb-6">
+          <div className="flex items-start justify-between mb-4 flex-wrap gap-2">
+            <div>
+              <h2 className="text-xl font-black text-indigo-400">🌟 Memory Stars</h2>
+              <p className="text-xs text-gray-400 mt-1">Show an 8-character sequence (digits + letters) for a few seconds, then auto-flip to ★★★★★★★★. Teams memorize and guess the exact order. Host announces, awards manually.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={saveMemoryStars} className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-black text-sm transition">Save</button>
+              <button onClick={clearMemoryStars} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition">Clear All</button>
+            </div>
+          </div>
+          {msSavedNotice && <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">✓ Saved.</div>}
+          {msError && <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{msError}</div>}
+          <div className={`rounded-lg p-2 text-center text-xs mb-4 ${msPersistedCount > 0 ? "bg-gray-800 text-gray-300" : "bg-yellow-950/30 text-yellow-300 border border-yellow-800"}`}>
+            {msPersistedCount > 0 ? (
+              <>💾 Currently saved: <span className="font-bold text-white">{msPersistedCount}</span> sequence{msPersistedCount === 1 ? "" : "s"}{memSeqs.filter((s) => s.text.length === 8).length !== msPersistedCount && <span className="text-yellow-400"> · unsaved edits above — click Save</span>}</>
+            ) : (
+              <>⚠️ Nothing saved yet. Add sequences and click <span className="font-bold">Save</span>.</>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {memSeqs.length === 0 && <div className="text-center py-8 text-gray-500 text-sm">No sequences yet. Click "Add sequence" below.</div>}
+            {memSeqs.map((s, idx) => (
+              <div key={s.id} className="bg-gray-800/60 rounded-xl p-3 border border-gray-700">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-indigo-300 font-bold text-sm shrink-0">#{idx + 1}</span>
+                  <input
+                    type="text"
+                    maxLength={8}
+                    value={s.text}
+                    onChange={(e) => updateMemSeq(s.id, { text: e.target.value.replace(/\s/g, "").toUpperCase() })}
+                    placeholder="A1B2C3D4"
+                    className="flex-1 min-w-[160px] bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white font-mono font-black text-lg tracking-wider focus:outline-none focus:border-indigo-400"
+                  />
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-gray-400 shrink-0">Show for</label>
+                    <select
+                      value={s.durationMs}
+                      onChange={(e) => updateMemSeq(s.id, { durationMs: parseInt(e.target.value, 10) })}
+                      className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+                    >
+                      <option value={3000}>3 sec</option>
+                      <option value={5000}>5 sec</option>
+                      <option value={7000}>7 sec</option>
+                      <option value={10000}>10 sec</option>
+                      <option value={15000}>15 sec</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => moveMemSeq(idx, -1)} disabled={idx === 0} className="bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-white text-xs w-7 h-7 rounded">↑</button>
+                    <button onClick={() => moveMemSeq(idx, 1)} disabled={idx === memSeqs.length - 1} className="bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-white text-xs w-7 h-7 rounded">↓</button>
+                    <button onClick={() => removeMemSeq(s.id)} className="text-xs bg-red-900 hover:bg-red-800 text-white px-2 h-7 rounded">×</button>
+                  </div>
+                </div>
+                {s.text.length > 0 && s.text.length < 8 && (
+                  <p className="text-yellow-400 text-[10px] mt-1 ml-7">Needs {8 - s.text.length} more character{8 - s.text.length === 1 ? "" : "s"}</p>
+                )}
+              </div>
+            ))}
+            <button onClick={addMemSeq} className="w-full py-2 bg-indigo-700/40 hover:bg-indigo-700/70 text-indigo-200 rounded-lg font-bold text-sm transition">+ Add sequence</button>
+          </div>
+          <p className="text-xs text-gray-600 text-center mt-4">{memSeqs.length} {memSeqs.length === 1 ? "sequence" : "sequences"} • Each must be exactly 8 chars (auto-uppercased, spaces stripped)</p>
         </div>
       </div>
     </div>

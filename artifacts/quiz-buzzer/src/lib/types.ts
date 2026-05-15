@@ -6,7 +6,7 @@ export interface Question { id: string; text: string; choices?: { label: string;
 
 export type GameStatus = "lobby" | "playing" | "question_active" | "buzzed" | "round_end" | "finished" | "minigame" | "buzzer_active";
 
-export type MiniGameType = "pacman" | "number_survival" | "face_merge" | "mystery_puzzle" | "spot_difference" | null;
+export type MiniGameType = "pacman" | "number_survival" | "face_merge" | "mystery_puzzle" | "spot_difference" | "memory_stars" | null;
 
 export interface BuzzEvent { playerId: string; playerName: string; teamId: string; teamName: string; timestamp: number; }
 
@@ -90,7 +90,17 @@ export interface SpotDifferenceData {
   total: number;
 }
 
-export type MiniGameData = NumberSurvivalData | FaceMergeData | MysteryPuzzleData | PacmanData | SpotDifferenceData | null;
+export interface MemoryStarsData {
+  type: "memory_stars";
+  index: number;
+  total: number;
+  phase: "idle" | "showing" | "hidden" | "revealed";
+  display: string;            // either the actual chars, or stars when hidden/idle
+  showEndsAt: number | null;  // ms timestamp when 'showing' auto-flips to 'hidden'
+  durationMs: number;
+}
+
+export type MiniGameData = NumberSurvivalData | FaceMergeData | MysteryPuzzleData | PacmanData | SpotDifferenceData | MemoryStarsData | null;
 
 export interface GameState {
   id: string; teams: Team[]; players: Record<string, PlayerInfo[]>;

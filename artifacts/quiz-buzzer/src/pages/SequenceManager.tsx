@@ -13,7 +13,7 @@ export interface SequenceItem {
   // for kind === "question": specific question id from the question bank
   questionId?: string;
   // for kind === "minigame": which mini-game
-  minigameType?: "number_survival" | "face_merge" | "mystery_puzzle" | "spot_difference";
+  minigameType?: "number_survival" | "face_merge" | "mystery_puzzle" | "spot_difference" | "memory_stars";
   // human-readable label override
   label?: string;
 }
@@ -49,6 +49,7 @@ const MINIGAME_LABEL: Record<string, string> = {
   face_merge: "🖼️ Face Merge",
   mystery_puzzle: "🔐 Mystery Puzzle",
   spot_difference: "🔍 Spot the Difference",
+  memory_stars: "🌟 Memory Stars",
 };
 
 const KIND_LABEL: Record<SequenceItemKind, string> = {
@@ -215,6 +216,7 @@ export default function SequenceManager() {
                       <option value="face_merge">🖼️ Face Merge</option>
                       <option value="mystery_puzzle">🔐 Mystery Puzzle</option>
                       <option value="spot_difference">🔍 Spot the Difference</option>
+                      <option value="memory_stars">🌟 Memory Stars</option>
                     </select>
                   </div>
                 )}

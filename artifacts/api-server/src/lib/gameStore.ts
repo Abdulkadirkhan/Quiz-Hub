@@ -54,6 +54,25 @@ export interface SpotDifferenceState {
   currentIndex: number;
 }
 
+// Memory Stars — show a sequence of mixed chars (8 by default), let teams memorize,
+// then auto-flip to ★★★★★★★★ after N seconds. Host announces and awards.
+// Phases:
+//   - idle:     between sequences; "[Show]" button on admin
+//   - showing:  chars visible; auto-flips to hidden at showEndsAt
+//   - hidden:   stars showing; audience guesses verbally
+//   - revealed: chars visible again, no timer (so host can confirm before awarding)
+export interface MemoryStarsSequence {
+  text: string;            // exactly 8 characters
+  durationMs: number;      // how long to display before auto-hiding (default 5000)
+}
+
+export interface MemoryStarsState {
+  sequences: MemoryStarsSequence[];
+  currentIndex: number;
+  phase: "idle" | "showing" | "hidden" | "revealed";
+  showEndsAt: number | null;  // when 'showing' auto-flips to 'hidden'
+}
+
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
 
 export interface MysteryPuzzleAttempt {
@@ -116,6 +135,7 @@ export interface GameSession {
   mysteryPuzzleState: MysteryPuzzleState | null;
   pacmanState: PacManState | null;
   spotDifferenceState: SpotDifferenceState | null;
+  memoryStarsState: MemoryStarsState | null;
 }
 
 const DEFAULT_QUESTIONS: Question[] = [
@@ -137,7 +157,7 @@ class GameStore {
       currentQuestionIndex: -1, status: "lobby", buzzedBy: null, adminSocketId,
       createdAt: Date.now(), miniGameType: null,
       numberSurvivalState: null, faceMergeState: null, mysteryPuzzleState: null,
-      pacmanState: null, spotDifferenceState: null,
+      pacmanState: null, spotDifferenceState: null, memoryStarsState: null,
     };
     this.sessions.set(id, session);
     logger.info({ sessionId: id, teams: teamNames }, "Game session created");
@@ -477,6 +497,83 @@ class GameStore {
     return true;
   }
   // =================================
+
+  // ====== Memory Stars ======
+  initMemoryStars(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s) return false;
+    s.miniGameType = "memory_stars";
+    s.memoryStarsState = { sequences: [], currentIndex: 0, phase: "idle", showEndsAt: null };
+    return true;
+  }
+
+  setMemoryStarsSequences(sessionId: string, sequences: MemoryStarsSequence[]): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.memoryStarsState) return false;
+    // Normalize: trim each to 8 chars, fall back to a 5s display if no duration
+    s.memoryStarsState.sequences = sequences.map((seq) => ({
+      text: (seq.text || "").slice(0, 8),
+      durationMs: Math.max(1000, Math.min(30000, seq.durationMs || 5000)),
+    }));
+    s.memoryStarsState.currentIndex = 0;
+    s.memoryStarsState.phase = "idle";
+    s.memoryStarsState.showEndsAt = null;
+    return true;
+  }
+
+  // Move to "showing" with timer running
+  memoryStarsShow(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.memoryStarsState) return false;
+    const ms = s.memoryStarsState;
+    const cur = ms.sequences[ms.currentIndex];
+    if (!cur) return false;
+    ms.phase = "showing";
+    ms.showEndsAt = Date.now() + cur.durationMs;
+    return true;
+  }
+
+  // Manually flip to "hidden" (server timer also calls this when duration expires)
+  memoryStarsHide(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.memoryStarsState) return false;
+    s.memoryStarsState.phase = "hidden";
+    s.memoryStarsState.showEndsAt = null;
+    return true;
+  }
+
+  // Reveal the answer (chars stay visible indefinitely, no timer)
+  memoryStarsReveal(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.memoryStarsState) return false;
+    s.memoryStarsState.phase = "revealed";
+    s.memoryStarsState.showEndsAt = null;
+    return true;
+  }
+
+  // Advance to next sequence (back to idle for the new one)
+  memoryStarsNext(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.memoryStarsState) return false;
+    const ms = s.memoryStarsState;
+    if (ms.currentIndex + 1 >= ms.sequences.length) return false;
+    ms.currentIndex += 1;
+    ms.phase = "idle";
+    ms.showEndsAt = null;
+    return true;
+  }
+
+  memoryStarsGoto(sessionId: string, index: number): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.memoryStarsState) return false;
+    const ms = s.memoryStarsState;
+    if (index < 0 || index >= ms.sequences.length) return false;
+    ms.currentIndex = index;
+    ms.phase = "idle";
+    ms.showEndsAt = null;
+    return true;
+  }
+  // =========================
 
   initMysteryPuzzle(sessionId: string, teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }>): boolean {
     const s = this.sessions.get(sessionId);
@@ -948,6 +1045,24 @@ class GameStore {
         image: sd.images[sd.currentIndex] ?? null,
         index: sd.currentIndex,
         total: sd.images.length,
+      };
+    } else if (s.miniGameType === "memory_stars" && s.memoryStarsState) {
+      const ms = s.memoryStarsState;
+      const cur = ms.sequences[ms.currentIndex];
+      // Only reveal the actual chars to clients when admin is actively showing or revealed.
+      // While hidden, send a stars string of the same length so clients render the right shape.
+      const isVisible = ms.phase === "showing" || ms.phase === "revealed";
+      const text = cur?.text ?? "";
+      const display = isVisible ? text : "★".repeat(text.length);
+      miniGameData = {
+        type: "memory_stars",
+        index: ms.currentIndex,
+        total: ms.sequences.length,
+        phase: ms.phase,
+        display,
+        showEndsAt: ms.showEndsAt,
+        // Hint of how long this sequence is supposed to show (for client countdown UI)
+        durationMs: cur?.durationMs ?? 5000,
       };
     }
 
