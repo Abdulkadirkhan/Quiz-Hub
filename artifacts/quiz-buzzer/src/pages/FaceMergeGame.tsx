@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Socket } from "socket.io-client";
 import { Team, GameState, FaceMergeData } from "@/lib/types";
 import { getTeamColors } from "@/lib/teamColors";
+import { resizeImageFile } from "@/lib/imageUtils";
 
 interface Props {
   teams: Team[];
@@ -97,22 +98,27 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
       image2: s.image2 as string,
       merged: s.merged,
     }));
+    // Persist to localStorage so the next game session auto-loads these
+    try {
+      const persistable = valid.map((s, i) => ({
+        id: `g-${Date.now()}-${i}`,
+        merged: s.merged ?? null,
+        image1: s.image1 ?? null,
+        image2: s.image2 ?? null,
+      }));
+      localStorage.setItem(FACE_MERGE_SETS_KEY, JSON.stringify(persistable));
+    } catch {
+      // localStorage full or unavailable — game continues with this session's uploads regardless
+    }
     socket.emit("admin:face_merge_setup", { sessionId, sets: payload });
     setSentSets(true);
   }, [manualSets, socket, sessionId]);
 
-  const readFile = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
   const handleManualPick = async (idx: number, field: "merged" | "image1" | "image2", file: File | null) => {
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setError("Image > 2 MB"); return; }
+    if (file.size > 20 * 1024 * 1024) { setError("Source image > 20 MB — too big even before resize."); return; }
     try {
-      const data = await readFile(file);
+      const data = await resizeImageFile(file, { maxDim: 1024, quality: 0.85 });
       setManualSets((prev) => prev.map((s, i) => i === idx ? { ...s, [field]: data } : s));
     } catch { setError("Couldn't read file"); }
   };

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
+import { resizeImageFile } from "@/lib/imageUtils";
 
 // ====================== FACE MERGE ======================
 
@@ -35,15 +36,6 @@ function loadFaceMergeSets(): FaceMergeSet[] {
     }
   } catch {}
   return [];
-}
-
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 // ====================== MYSTERY PUZZLE (v2 split-team) ======================
@@ -126,9 +118,10 @@ export default function MiniGameManager() {
   const updateSetImage = async (setId: string, field: "merged" | "image1" | "image2", file: File | null) => {
     setFmError("");
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setFmError("Image is larger than 2 MB."); return; }
+    // Allow large source files (phone photos can be 10+ MB) — we downscale to ~1024px before storing.
+    if (file.size > 20 * 1024 * 1024) { setFmError("Source image is larger than 20 MB. Please use a smaller photo."); return; }
     try {
-      const data = await readFile(file);
+      const data = await resizeImageFile(file, { maxDim: 1024, quality: 0.85 });
       setSets((prev) => prev.map((s) => s.id === setId ? { ...s, [field]: data } : s));
     } catch { setFmError("Could not read that file."); }
   };
@@ -333,7 +326,7 @@ export default function MiniGameManager() {
             })}
             <button onClick={addSet} className="w-full py-3 rounded-xl border-2 border-dashed border-pink-700 text-pink-400 hover:bg-pink-950/30 hover:border-pink-500 font-bold text-sm transition">+ Add Image Set</button>
           </div>
-          <p className="text-xs text-gray-600 text-center mt-4">{sets.length} {sets.length === 1 ? "set" : "sets"} • Keep each image under 2 MB</p>
+          <p className="text-xs text-gray-600 text-center mt-4">{sets.length} {sets.length === 1 ? "set" : "sets"} • Images are auto-resized to 1024px to fit in browser storage</p>
         </div>
 
         {/* MYSTERY PUZZLE */}
