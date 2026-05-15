@@ -90,7 +90,10 @@ export default function AdminGame() {
     socket.on("game:question", ({ state }: { state: GameState }) => {
       setGameState(state); setBuzzFlash(false); setMiniGameActive(false); setMiniGameResult(null);
       const q = state.currentQuestion;
-      if (q?.timeLimit) { setTimer(q.timeLimit); startTimer(q.timeLimit); }
+      // Open-ended questions (no choices) have no time limit — buzzer-only, host controls pace
+      const isOpenEnded = q && (!q.choices || q.choices.length === 0);
+      if (q?.timeLimit && !isOpenEnded) { setTimer(q.timeLimit); startTimer(q.timeLimit); }
+      else { setTimer(null); }
       if (state.currentQuestionIndex >= 0) {
         setUsedQuestionIndices((prev) => new Set(prev).add(state.currentQuestionIndex));
       }
@@ -107,7 +110,9 @@ export default function AdminGame() {
     socket.on("game:finished", (state: GameState) => { setGameState(state); stopTimer(); setMiniGameActive(false); });
     socket.on("game:buzz_reset", (state: GameState) => {
       setGameState(state); setBuzzFlash(false);
-      if (state.currentQuestion?.timeLimit) { setTimer(state.currentQuestion.timeLimit); startTimer(state.currentQuestion.timeLimit); }
+      const q = state.currentQuestion;
+      const isOpenEnded = q && (!q.choices || q.choices.length === 0);
+      if (q?.timeLimit && !isOpenEnded) { setTimer(q.timeLimit); startTimer(q.timeLimit); }
     });
     socket.on("game:player_joined", (state: GameState) => setGameState(state));
     socket.on("game:player_left", (state: GameState) => setGameState(state));
@@ -417,6 +422,15 @@ export default function AdminGame() {
             >
               🔄 Reset
             </button>
+            <a
+              href={`${typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}` : ""}/watch/${sessionId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg font-bold text-sm transition flex items-center gap-2"
+              title="Open the big-screen view in a new tab — share this with the TV"
+            >
+              👁 Spectator View
+            </a>
             <button onClick={() => emit("admin:end_game")} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-sm transition">
               End Game
             </button>

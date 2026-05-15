@@ -169,15 +169,16 @@ export default function QuestionsPage() {
                         checked={!editBuf.choices || editBuf.choices.length === 0}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setEditBuf({ ...editBuf, choices: undefined });
+                            // Open-ended: no choices, no timer
+                            setEditBuf({ ...editBuf, choices: undefined, timeLimit: undefined });
                           } else {
-                            setEditBuf({ ...editBuf, choices: [{ label: "A", text: "" }, { label: "B", text: "" }, { label: "C", text: "" }, { label: "D", text: "" }] });
+                            setEditBuf({ ...editBuf, choices: [{ label: "A", text: "" }, { label: "B", text: "" }, { label: "C", text: "" }, { label: "D", text: "" }], timeLimit: editBuf.timeLimit || 30 });
                           }
                         }}
                         className="w-4 h-4 accent-yellow-400"
                       />
                       <label htmlFor={`openended-${editBuf.id}`} className="text-sm text-gray-300 cursor-pointer select-none">
-                        Open-ended question <span className="text-gray-500">(no options shown — teams buzz to answer)</span>
+                        Open-ended question <span className="text-gray-500">(no options, no timer — teams buzz to answer)</span>
                       </label>
                     </div>
                     {editBuf.choices && editBuf.choices.length > 0 && (
@@ -200,16 +201,18 @@ export default function QuestionsPage() {
                         ))}
                       </div>
                     )}
-                    <div className="flex items-center gap-3">
-                      <label className="text-xs text-gray-400 font-semibold">Time Limit</label>
-                      <select
-                        className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none"
-                        value={editBuf.timeLimit || 30}
-                        onChange={(e) => setEditBuf({ ...editBuf, timeLimit: parseInt(e.target.value) })}
-                      >
-                        {[10, 15, 20, 30, 45, 60].map((t) => <option key={t} value={t}>{t}s</option>)}
-                      </select>
-                    </div>
+                    {editBuf.choices && editBuf.choices.length > 0 && (
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs text-gray-400 font-semibold">Time Limit</label>
+                        <select
+                          className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none"
+                          value={editBuf.timeLimit || 30}
+                          onChange={(e) => setEditBuf({ ...editBuf, timeLimit: parseInt(e.target.value) })}
+                        >
+                          {[10, 15, 20, 30, 45, 60].map((t) => <option key={t} value={t}>{t}s</option>)}
+                        </select>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button onClick={commitEdit} disabled={!editBuf.text.trim()} className="bg-yellow-400 text-black px-4 py-2 rounded-lg font-black text-sm hover:bg-yellow-300 transition disabled:opacity-40">Save</button>
                       <button onClick={cancelEdit} className="bg-gray-700 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-gray-600 transition">Cancel</button>
@@ -233,7 +236,9 @@ export default function QuestionsPage() {
                       ) : (
                         <span className="inline-block text-xs text-orange-400 font-bold mt-1">🔔 Open-ended — teams buzz to answer</span>
                       )}
-                      <p className="text-xs text-gray-600 mt-1">⏱ {q.timeLimit || 30}s</p>
+                      {q.choices && q.choices.length > 0 ? (
+                        <p className="text-xs text-gray-600 mt-1">⏱ {q.timeLimit || 30}s</p>
+                      ) : null}
                     </div>
                     <div className="flex gap-1 flex-shrink-0">
                       <button onClick={() => startEdit(q)} className="bg-gray-800 hover:bg-gray-700 text-white px-2 py-1.5 rounded-lg text-xs font-bold transition">Edit</button>

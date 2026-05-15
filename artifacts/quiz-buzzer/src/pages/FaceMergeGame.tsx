@@ -73,7 +73,8 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
     if (sentSets) return;
     if (totalSets > 0) { setSentSets(true); return; }
     const saved = loadSets();
-    const valid = saved.filter((s) => s.image1 && s.image2);
+    // A set is playable if it has a merged image OR both Person 1 and Person 2 (overlay fallback).
+    const valid = saved.filter((s) => s.merged || (s.image1 && s.image2));
     if (valid.length === 0) return;
     const payload = valid.map((s) => ({
       image1: s.image1 as string,
@@ -86,9 +87,9 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
 
   const sendManualSets = useCallback(() => {
     setError("");
-    const valid = manualSets.filter((s) => s.image1 && s.image2);
+    const valid = manualSets.filter((s) => s.merged || (s.image1 && s.image2));
     if (valid.length === 0) {
-      setError("Please upload at least one set with both Person 1 and Person 2.");
+      setError("Each set needs at least the Merged image (or both Person 1 and Person 2).");
       return;
     }
     const payload = valid.map((s) => ({
