@@ -7,6 +7,9 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
     path: "/api/socket.io",
+    // Face Merge sends base64 image payloads on setup. Default 1 MB is too small for 5+ image sets;
+    // 5 sets × 3 images × ~200 KB resized ≈ 3 MB. 20 MB gives generous headroom.
+    maxHttpBufferSize: 20 * 1024 * 1024,
   });
 
   // Per-session Pac-Man tick loops
