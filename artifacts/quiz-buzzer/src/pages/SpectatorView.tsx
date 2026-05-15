@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRoute } from "wouter";
 import { getSocket } from "@/lib/socket";
-import { GameState, FaceMergeData, NumberSurvivalData, MysteryPuzzleData } from "@/lib/types";
+import { GameState, FaceMergeData, NumberSurvivalData, MysteryPuzzleData, SpotDifferenceData } from "@/lib/types";
 import { getTeamColors } from "@/lib/teamColors";
 
 export default function SpectatorView() {
@@ -104,6 +104,7 @@ export default function SpectatorView() {
   const fmData = miniGameType === "face_merge" ? (miniGameData as FaceMergeData | null) : null;
   const nsData = miniGameType === "number_survival" ? (miniGameData as NumberSurvivalData | null) : null;
   const mpData = miniGameType === "mystery_puzzle" ? (miniGameData as MysteryPuzzleData | null) : null;
+  const sdData = miniGameType === "spot_difference" ? (miniGameData as SpotDifferenceData | null) : null;
 
   const isMiniGame = status === "minigame" && miniGameType;
 
@@ -356,6 +357,28 @@ export default function SpectatorView() {
             <div className="text-4xl mb-2">👾</div>
             <h2 className="text-xl font-black text-purple-300">Pac-Man Battle</h2>
             <p className="text-purple-400/70 text-sm mt-2">Players are competing on their devices — see the scoreboard above for results.</p>
+          </div>
+        )}
+
+        {isMiniGame && miniGameType === "spot_difference" && sdData && (
+          <div className="bg-gray-900 rounded-2xl p-4 mb-6 border-2 border-teal-700">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="text-xl font-black text-teal-300">🔍 Spot the Difference</h2>
+              <p className="text-teal-200 text-sm font-bold">Image {sdData.index + 1} of {sdData.total}</p>
+            </div>
+            {sdData.image ? (
+              <div className="flex items-center justify-center bg-black/40 rounded-xl p-2">
+                <img
+                  src={sdData.image}
+                  alt={`Spot the difference ${sdData.index + 1}`}
+                  className="rounded-lg max-w-full"
+                  style={{ maxHeight: "75vh", objectFit: "contain" }}
+                />
+              </div>
+            ) : (
+              <p className="text-gray-500 italic text-center py-8">No image to display.</p>
+            )}
+            <p className="text-center text-xs text-gray-500 mt-2">Find the difference between the two sides!</p>
           </div>
         )}
 

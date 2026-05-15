@@ -8,6 +8,7 @@ import PacManGame from "./PacManGame";
 import NumberSurvivalGame from "./NumberSurvivalGame";
 import FaceMergeGame from "./FaceMergeGame";
 import MysteryPuzzleGame from "./MysteryPuzzleGame";
+import SpotDifferenceGame from "./SpotDifferenceGame";
 import MiniGameSelector from "./MiniGameSelector";
 import { loadSequence, SequenceItem } from "./SequenceManager";
 
@@ -36,6 +37,18 @@ function loadSavedMysteryPuzzlePayload(teamAId: string, teamBId: string): { team
     };
   } catch {
     return null;
+  }
+}
+
+function loadSavedSpotDiffImages(): string[] {
+  try {
+    const raw = localStorage.getItem("quiz_minigames_spot_difference");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Array<{ image: string | null }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((s) => s.image).filter((img): img is string => !!img);
+  } catch {
+    return [];
   }
 }
 
@@ -175,10 +188,16 @@ export default function AdminGame() {
     } catch {}
   };
 
-  const handleSelectMiniGame = (type: MiniGameType, data?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[] }> }) => {
+  const handleSelectMiniGame = (type: MiniGameType, data?: { teamPuzzles?: Record<string, { story: string; clues: MysteryPuzzleClue[] }>; images?: string[] }) => {
     setShowSelector(false);
     if (!type) return;
-    emit("admin:start_minigame", { type, puzzleData: data });
+    if (type === "spot_difference") {
+      emit("admin:start_minigame", { type, images: data?.images });
+    } else if (data && "teamPuzzles" in data) {
+      emit("admin:start_minigame", { type, puzzleData: { teamPuzzles: data.teamPuzzles } });
+    } else {
+      emit("admin:start_minigame", { type });
+    }
   };
 
   const handleMiniGameEnd = useCallback((winnerTeamId?: string) => {
@@ -234,6 +253,13 @@ export default function AdminGame() {
           return;
         }
         emit("admin:start_minigame", { type: "mystery_puzzle", puzzleData: payload });
+      } else if (item.minigameType === "spot_difference") {
+        const images = loadSavedSpotDiffImages();
+        if (images.length === 0) {
+          alert("No Spot the Difference images are saved. Open Manage Mini-Games first.");
+          return;
+        }
+        emit("admin:start_minigame", { type: "spot_difference", images });
       } else {
         emit("admin:start_minigame", { type: item.minigameType });
       }
@@ -261,6 +287,7 @@ export default function AdminGame() {
     number_survival: "🔢 NUMBER SURVIVAL",
     face_merge: "🖼️ FACE MERGE",
     mystery_puzzle: "🔐 MYSTERY PUZZLE",
+    spot_difference: "🔍 SPOT THE DIFFERENCE",
   };
 
   return (
@@ -506,6 +533,9 @@ export default function AdminGame() {
             )}
             {miniGameType === "mystery_puzzle" && (
               <MysteryPuzzleGame key={miniGameKey} teams={teams} socket={socketRef.current} sessionId={sessionId} gameState={gameState} onEnd={handleMiniGameEnd} />
+            )}
+            {miniGameType === "spot_difference" && (
+              <SpotDifferenceGame key={miniGameKey} teams={teams} socket={socketRef.current} sessionId={sessionId} gameState={gameState} onEnd={handleMiniGameEnd} />
             )}
           </div>
         )}

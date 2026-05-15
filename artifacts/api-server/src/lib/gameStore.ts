@@ -46,6 +46,14 @@ export interface FaceMergeState {
   currentSetIndex: number;
 }
 
+// Spot the Difference — admin uploads N combined images (each shows the two sides side-by-side).
+// During play, one image at a time is shown big on admin + spectator. Players see only a "look up"
+// message — host announces and awards. No reveal phase, no buzzing.
+export interface SpotDifferenceState {
+  images: string[];
+  currentIndex: number;
+}
+
 export interface MysteryPuzzleClue { question: string; answer: string; reward: string; }
 
 export interface MysteryPuzzleAttempt {
@@ -107,6 +115,7 @@ export interface GameSession {
   faceMergeState: FaceMergeState | null;
   mysteryPuzzleState: MysteryPuzzleState | null;
   pacmanState: PacManState | null;
+  spotDifferenceState: SpotDifferenceState | null;
 }
 
 const DEFAULT_QUESTIONS: Question[] = [
@@ -128,7 +137,7 @@ class GameStore {
       currentQuestionIndex: -1, status: "lobby", buzzedBy: null, adminSocketId,
       createdAt: Date.now(), miniGameType: null,
       numberSurvivalState: null, faceMergeState: null, mysteryPuzzleState: null,
-      pacmanState: null,
+      pacmanState: null, spotDifferenceState: null,
     };
     this.sessions.set(id, session);
     logger.info({ sessionId: id, teams: teamNames }, "Game session created");
@@ -432,6 +441,42 @@ class GameStore {
     for (const p of s.players.values()) p.hasBuzzed = false;
     return true;
   }
+
+  // ====== Spot the Difference ======
+  initSpotDifference(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s) return false;
+    s.miniGameType = "spot_difference";
+    s.spotDifferenceState = { images: [], currentIndex: 0 };
+    return true;
+  }
+
+  setSpotDifferenceImages(sessionId: string, images: string[]): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.spotDifferenceState) return false;
+    s.spotDifferenceState.images = images;
+    s.spotDifferenceState.currentIndex = 0;
+    return true;
+  }
+
+  spotDifferenceNext(sessionId: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.spotDifferenceState) return false;
+    const sd = s.spotDifferenceState;
+    if (sd.currentIndex + 1 >= sd.images.length) return false;
+    sd.currentIndex += 1;
+    return true;
+  }
+
+  spotDifferenceGoto(sessionId: string, index: number): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.spotDifferenceState) return false;
+    const sd = s.spotDifferenceState;
+    if (index < 0 || index >= sd.images.length) return false;
+    sd.currentIndex = index;
+    return true;
+  }
+  // =================================
 
   initMysteryPuzzle(sessionId: string, teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }>): boolean {
     const s = this.sessions.get(sessionId);
@@ -895,6 +940,14 @@ class GameStore {
         players, teamScores,
         durationSec: pm.durationSec,
         remainingMs, ended: pm.ended,
+      };
+    } else if (s.miniGameType === "spot_difference" && s.spotDifferenceState) {
+      const sd = s.spotDifferenceState;
+      miniGameData = {
+        type: "spot_difference",
+        image: sd.images[sd.currentIndex] ?? null,
+        index: sd.currentIndex,
+        total: sd.images.length,
       };
     }
 

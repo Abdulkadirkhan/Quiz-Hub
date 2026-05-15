@@ -6,7 +6,7 @@ export interface Question { id: string; text: string; choices?: { label: string;
 
 export type GameStatus = "lobby" | "playing" | "question_active" | "buzzed" | "round_end" | "finished" | "minigame" | "buzzer_active";
 
-export type MiniGameType = "pacman" | "number_survival" | "face_merge" | "mystery_puzzle" | null;
+export type MiniGameType = "pacman" | "number_survival" | "face_merge" | "mystery_puzzle" | "spot_difference" | null;
 
 export interface BuzzEvent { playerId: string; playerName: string; teamId: string; teamName: string; timestamp: number; }
 
@@ -83,7 +83,14 @@ export interface PacmanData {
   ended: boolean;
 }
 
-export type MiniGameData = NumberSurvivalData | FaceMergeData | MysteryPuzzleData | PacmanData | null;
+export interface SpotDifferenceData {
+  type: "spot_difference";
+  image: string | null;  // current image; null on player payloads (image stripped to save bandwidth)
+  index: number;
+  total: number;
+}
+
+export type MiniGameData = NumberSurvivalData | FaceMergeData | MysteryPuzzleData | PacmanData | SpotDifferenceData | null;
 
 export interface GameState {
   id: string; teams: Team[]; players: Record<string, PlayerInfo[]>;

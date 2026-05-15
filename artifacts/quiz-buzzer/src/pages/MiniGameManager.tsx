@@ -2,6 +2,23 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { resizeImageFile } from "@/lib/imageUtils";
 
+// ====================== SPOT THE DIFFERENCE ======================
+
+interface SpotDiffImage { id: string; image: string | null; }
+
+const SPOT_DIFF_KEY = "quiz_minigames_spot_difference";
+
+function loadSpotDiffImages(): SpotDiffImage[] {
+  try {
+    const raw = localStorage.getItem(SPOT_DIFF_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
 // ====================== FACE MERGE ======================
 
 interface FaceMergeSet {
@@ -103,6 +120,12 @@ export default function MiniGameManager() {
   const [mpSavedNotice, setMpSavedNotice] = useState(false);
   const [mpError, setMpError] = useState("");
 
+  // Spot the Difference state
+  const [spotImages, setSpotImages] = useState<SpotDiffImage[]>(loadSpotDiffImages);
+  const [sdSavedNotice, setSdSavedNotice] = useState(false);
+  const [sdError, setSdError] = useState("");
+  const [sdPersistedCount, setSdPersistedCount] = useState<number>(() => loadSpotDiffImages().length);
+
   useEffect(() => {
     if (!fmSavedNotice) return;
     const t = setTimeout(() => setFmSavedNotice(false), 2000);
@@ -113,6 +136,11 @@ export default function MiniGameManager() {
     const t = setTimeout(() => setMpSavedNotice(false), 2000);
     return () => clearTimeout(t);
   }, [mpSavedNotice]);
+  useEffect(() => {
+    if (!sdSavedNotice) return;
+    const t = setTimeout(() => setSdSavedNotice(false), 2000);
+    return () => clearTimeout(t);
+  }, [sdSavedNotice]);
 
   // ---------- Face Merge handlers ----------
 
@@ -162,6 +190,49 @@ export default function MiniGameManager() {
     localStorage.removeItem(OLD_FACE_MERGE_KEY);
     setSets([]);
     setPersistedSetCount(0);
+  };
+
+  // ---------- Spot the Difference handlers ----------
+  const addSpotImage = () => setSpotImages((prev) => [...prev, { id: newId(), image: null }]);
+  const removeSpotImage = (id: string) => setSpotImages((prev) => prev.filter((s) => s.id !== id));
+  const updateSpotImage = async (id: string, file: File | null) => {
+    setSdError("");
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { setSdError("Source image > 20 MB — too big even before resize."); return; }
+    try {
+      const data = await resizeImageFile(file, { maxDim: 1280, quality: 0.85 });
+      setSpotImages((prev) => prev.map((s) => s.id === id ? { ...s, image: data } : s));
+    } catch { setSdError("Could not read that file."); }
+  };
+  const moveSpotImage = (idx: number, dir: -1 | 1) => {
+    setSpotImages((prev) => {
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+  const saveSpotDifference = () => {
+    setSdError("");
+    const valid = spotImages.filter((s) => s.image);
+    const payload = JSON.stringify(valid);
+    const sizeMB = payload.length / (1024 * 1024);
+    if (sizeMB > 4) {
+      setSdError(`Total size is ${sizeMB.toFixed(1)} MB — browsers cap localStorage at ~5 MB. Remove some images.`);
+      return;
+    }
+    try {
+      localStorage.setItem(SPOT_DIFF_KEY, payload);
+      setSdSavedNotice(true);
+      setSdPersistedCount(valid.length);
+    } catch { setSdError(`Couldn't save — browser storage full (~${sizeMB.toFixed(1)} MB).`); }
+  };
+  const clearSpotDifference = () => {
+    if (!confirm("Clear all Spot the Difference images?")) return;
+    localStorage.removeItem(SPOT_DIFF_KEY);
+    setSpotImages([]);
+    setSdPersistedCount(0);
   };
 
   // ---------- Mystery Puzzle handlers ----------
@@ -357,6 +428,64 @@ export default function MiniGameManager() {
             <MysteryTeamColumn which="teamA" label="Team A puzzle" accent="border-blue-700" />
             <MysteryTeamColumn which="teamB" label="Team B puzzle" accent="border-red-700" />
           </div>
+        </div>
+
+        {/* SPOT THE DIFFERENCE */}
+        <div className="bg-gray-900 rounded-2xl p-6 border-2 border-teal-700 mb-6">
+          <div className="flex items-start justify-between mb-4 flex-wrap gap-2">
+            <div>
+              <h2 className="text-xl font-black text-teal-400">🔍 Spot the Difference</h2>
+              <p className="text-xs text-gray-400 mt-1">Upload one combined image per question (both sides already shown side-by-side). During the game, host shows each image, audience yells the difference, host awards.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={saveSpotDifference} className="bg-yellow-400 hover:bg-yellow-300 text-black px-4 py-2 rounded-lg font-black text-sm transition">Save</button>
+              <button onClick={clearSpotDifference} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition">Clear All</button>
+            </div>
+          </div>
+          {sdSavedNotice && <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">✓ Saved.</div>}
+          {sdError && <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{sdError}</div>}
+          <div className={`rounded-lg p-2 text-center text-xs mb-4 ${sdPersistedCount > 0 ? "bg-gray-800 text-gray-300" : "bg-yellow-950/30 text-yellow-300 border border-yellow-800"}`}>
+            {sdPersistedCount > 0 ? (
+              <>💾 Currently saved: <span className="font-bold text-white">{sdPersistedCount}</span> image{sdPersistedCount === 1 ? "" : "s"}{spotImages.filter((s) => s.image).length !== sdPersistedCount && <span className="text-yellow-400"> · unsaved edits above — click Save</span>}</>
+            ) : (
+              <>⚠️ Nothing saved yet. Add images and click <span className="font-bold">Save</span>.</>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {spotImages.length === 0 && <div className="text-center py-8 text-gray-500 text-sm">No images yet. Click "Add image" below.</div>}
+            {spotImages.map((s, idx) => (
+              <div key={s.id} className="bg-gray-800/60 rounded-xl p-3 border border-gray-700">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 flex flex-col items-center gap-1">
+                    <span className="text-teal-300 font-bold text-sm">#{idx + 1}</span>
+                    <button onClick={() => moveSpotImage(idx, -1)} disabled={idx === 0} className="bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-white text-xs w-7 h-7 rounded">↑</button>
+                    <button onClick={() => moveSpotImage(idx, 1)} disabled={idx === spotImages.length - 1} className="bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-white text-xs w-7 h-7 rounded">↓</button>
+                  </div>
+                  <label className="cursor-pointer shrink-0">
+                    {s.image ? (
+                      <img src={s.image} alt={`Spot ${idx + 1}`} className="w-32 h-20 object-cover rounded-lg border-2 border-teal-500" />
+                    ) : (
+                      <div className="w-32 h-20 bg-gray-700 rounded-lg border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-2xl hover:border-teal-500 transition">📷</div>
+                    )}
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => updateSpotImage(s.id, e.target.files?.[0] ?? null)} />
+                  </label>
+                  <div className="flex-1 flex items-center justify-end gap-2">
+                    <span className="text-[10px] text-teal-400 underline cursor-pointer" onClick={() => {
+                      const el = document.querySelector(`#sd-input-${s.id}`) as HTMLInputElement | null;
+                      el?.click();
+                    }}>
+                      <input id={`sd-input-${s.id}`} type="file" accept="image/*" className="hidden" onChange={(e) => updateSpotImage(s.id, e.target.files?.[0] ?? null)} />
+                      {s.image ? "Change" : "Select"}
+                    </span>
+                    <button onClick={() => removeSpotImage(s.id)} className="text-xs bg-red-900 hover:bg-red-800 text-white px-2 py-1 rounded">Delete</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button onClick={addSpotImage} className="w-full py-2 bg-teal-700/40 hover:bg-teal-700/70 text-teal-200 rounded-lg font-bold text-sm transition">+ Add image</button>
+          </div>
+          <p className="text-xs text-gray-600 text-center mt-4">{spotImages.length} {spotImages.length === 1 ? "image" : "images"} • Auto-resized to 1280px wide for clarity</p>
         </div>
       </div>
     </div>

@@ -84,15 +84,16 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
   const broadcastSessionState = (sessionId: string, eventName: string, extra?: object) => {
     const fullState = gameStore.getPublicState(sessionId);
     const fullPayload = extra ? { ...extra, state: fullState } : fullState;
+    const mgd = fullState.miniGameData as { type?: string; image?: string | null; image1?: string | null; image2?: string | null; merged?: string | null } | null;
     const isFaceMergeWithImages =
-      fullState.miniGameData &&
-      (fullState.miniGameData as { type: string }).type === "face_merge" &&
-      ((fullState.miniGameData as { image1?: string | null }).image1 ||
-       (fullState.miniGameData as { image2?: string | null }).image2 ||
-       (fullState.miniGameData as { merged?: string | null }).merged);
-    if (isFaceMergeWithImages) {
-      // Strip image bytes for player payload
-      const liteData = { ...(fullState.miniGameData as object), image1: null, image2: null, merged: null };
+      mgd && mgd.type === "face_merge" && (mgd.image1 || mgd.image2 || mgd.merged);
+    const isSpotDiffWithImage =
+      mgd && mgd.type === "spot_difference" && mgd.image;
+    if (isFaceMergeWithImages || isSpotDiffWithImage) {
+      // Strip image bytes for player payload — they don't render the image on phones anyway
+      const liteData = isFaceMergeWithImages
+        ? { ...(fullState.miniGameData as object), image1: null, image2: null, merged: null }
+        : { ...(fullState.miniGameData as object), image: null };
       const liteState = { ...fullState, miniGameData: liteData };
       const litePayload = extra ? { ...extra, state: liteState } : liteState;
       io.to(`session:${sessionId}`).except(`players:${sessionId}`).emit(eventName, fullPayload);
@@ -251,7 +252,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       if (typeof cb === "function") cb({ state });
     });
 
-    socket.on("admin:start_minigame", (data: { sessionId: string; type: string; puzzleData?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }> } }) => {
+    socket.on("admin:start_minigame", (data: { sessionId: string; type: string; puzzleData?: { teamPuzzles: Record<string, { story: string; clues: MysteryPuzzleClue[]; vaultCode?: string }> }; images?: string[] }) => {
       const session = gameStore.getSession(data.sessionId);
       if (!session) return;
       session.status = "minigame";
@@ -260,6 +261,7 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.faceMergeState = null;
       session.mysteryPuzzleState = null;
       session.pacmanState = null;
+      session.spotDifferenceState = null;
       stopPacmanLoop(data.sessionId);
       stopNumberSurvivalLoop(data.sessionId);
 
@@ -273,6 +275,11 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       } else if (data.type === "pacman") {
         gameStore.initPacMan(data.sessionId, 30);
         startPacmanLoop(data.sessionId);
+      } else if (data.type === "spot_difference") {
+        gameStore.initSpotDifference(data.sessionId);
+        if (Array.isArray(data.images) && data.images.length > 0) {
+          gameStore.setSpotDifferenceImages(data.sessionId, data.images);
+        }
       }
 
       broadcastSessionState(data.sessionId, "game:minigame_started");
@@ -290,7 +297,27 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       session.faceMergeState = null;
       session.mysteryPuzzleState = null;
       session.pacmanState = null;
+      session.spotDifferenceState = null;
       broadcastSessionState(data.sessionId, "game:minigame_ended");
+    });
+
+    // Spot the Difference — admin uploads images at start, then navigates one at a time
+    socket.on("admin:spot_diff_setup", (data: { sessionId: string; images: string[] }) => {
+      const ok = gameStore.setSpotDifferenceImages(data.sessionId, data.images);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:spot_diff_updated");
+    });
+
+    socket.on("admin:spot_diff_next", (data: { sessionId: string }) => {
+      const ok = gameStore.spotDifferenceNext(data.sessionId);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:spot_diff_updated");
+    });
+
+    socket.on("admin:spot_diff_goto", (data: { sessionId: string; index: number }) => {
+      const ok = gameStore.spotDifferenceGoto(data.sessionId, data.index);
+      if (!ok) return;
+      broadcastSessionState(data.sessionId, "game:spot_diff_updated");
     });
 
     socket.on("pacman:direction", (data: { sessionId: string; direction: string }) => {
