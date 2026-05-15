@@ -408,6 +408,20 @@ export function createSocketServer(httpServer: HttpServer): SocketIOServer {
       }
     });
 
+    // Host-only mode: admin enters a code on behalf of a team (bypasses solver requirement)
+    socket.on("admin:mystery_submit_code", (data: { sessionId: string; teamId: string; code: string }, ack?: (res: { ok: boolean; correct: boolean; reason?: string }) => void) => {
+      const result = gameStore.submitMysteryCodeAsAdmin(data.sessionId, data.teamId, data.code);
+      if (ack) ack({ ok: result.ok, correct: result.correct, reason: result.reason });
+      if (!result.ok) return;
+      const state = gameStore.getPublicState(data.sessionId);
+      io.to(`session:${data.sessionId}`).emit("game:mystery_updated", state);
+      if (result.correct) {
+        gameStore.awardPoint(data.sessionId, data.teamId);
+        const after = gameStore.getPublicState(data.sessionId);
+        io.to(`session:${data.sessionId}`).emit("game:score_update", after);
+      }
+    });
+
     socket.on("disconnect", () => {
       logger.info({ socketId: socket.id }, "Socket disconnected");
       const removed = gameStore.removePlayer(socket.id);

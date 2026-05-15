@@ -140,9 +140,42 @@ export default function FaceMergeGame({ teams, socket, sessionId, gameState, onE
 
   // ----- Setup screen (no sets sent yet) -----
   if (!totalSets || phase === undefined) {
+    // Diagnostic info: what's actually in localStorage right now?
+    let diagnostic = "No saved Face Merge sets found.";
+    let detail = "";
+    try {
+      const raw = localStorage.getItem(FACE_MERGE_SETS_KEY);
+      const legacyRaw = localStorage.getItem(OLD_FACE_MERGE_KEY);
+      if (!raw && !legacyRaw) {
+        detail = `Looked at localStorage key "${FACE_MERGE_SETS_KEY}" → empty.`;
+      } else if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const total = parsed.length;
+            const valid = parsed.filter((s: SavedSet) => s.merged || (s.image1 && s.image2)).length;
+            detail = `Found ${total} saved set${total === 1 ? "" : "s"} in localStorage, ${valid} valid (with Merged or both originals). ${valid === 0 ? "None passed validation — re-upload in Manage Mini-Games." : ""}`;
+            if (valid > 0) diagnostic = `${valid} valid sets found. Reloading…`;
+          } else {
+            detail = `localStorage data is not an array — corrupted. Clear in Manage Mini-Games and re-save.`;
+          }
+        } catch {
+          detail = `localStorage data is invalid JSON — corrupted. Clear in Manage Mini-Games and re-save.`;
+        }
+      } else if (legacyRaw) {
+        detail = "Legacy single-set data exists but new multi-set is missing. Open Manage Mini-Games and click Save once.";
+      }
+    } catch {
+      detail = "Can't read localStorage — your browser may have it disabled.";
+    }
+
     return (
       <div className="space-y-4">
-        <p className="text-center text-gray-400">No saved Face Merge sets found. Either upload sets here, or go to <span className="text-pink-400 font-semibold">Manage Mini-Games</span> to save them.</p>
+        <div className="bg-gray-800/60 rounded-lg p-3 text-sm text-center">
+          <p className="text-gray-300 font-bold">{diagnostic}</p>
+          {detail && <p className="text-gray-500 text-xs mt-1">{detail}</p>}
+          <p className="text-gray-400 text-xs mt-2">Either upload sets right here, or go to <span className="text-pink-400 font-semibold">Manage Mini-Games</span> to save them.</p>
+        </div>
         {error && <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300">{error}</div>}
         <div className="space-y-3">
           {manualSets.map((s, idx) => (

@@ -541,6 +541,30 @@ class GameStore {
     return { ok: true, correct, teamId: player.teamId, playerName: player.name };
   }
 
+  // Admin-side code submission (host-only mode): bypasses the solver requirement so the host
+  // can play Mystery Puzzle even without any player phones connected. Audience yells their guess,
+  // host types it in on the admin screen for the appropriate team.
+  submitMysteryCodeAsAdmin(sessionId: string, teamId: string, code: string): { ok: boolean; correct: boolean; reason?: string } {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.mysteryPuzzleState) return { ok: false, correct: false, reason: "No active puzzle" };
+    const mp = s.mysteryPuzzleState;
+    if (mp.winnerTeamId) return { ok: false, correct: false, reason: "Already solved" };
+    const td = mp.teamData[teamId];
+    if (!td) return { ok: false, correct: false, reason: "No puzzle for this team" };
+    const trimmed = code.trim();
+    const correct = trimmed === td.vaultCode;
+    mp.attempts.push({
+      code: trimmed, correct, timestamp: Date.now(),
+      playerName: "(host)", teamId,
+    });
+    if (mp.attempts.length > 20) mp.attempts.splice(0, mp.attempts.length - 20);
+    if (correct) {
+      mp.winnerTeamId = teamId;
+      td.vaultUnlocked = true;
+    }
+    return { ok: true, correct };
+  }
+
   resolveNumberRound(sessionId: string): RoundResult | null {
     const s = this.sessions.get(sessionId);
     if (!s || !s.numberSurvivalState) return null;

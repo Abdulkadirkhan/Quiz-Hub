@@ -251,6 +251,7 @@ export default function AdminGame() {
   }
 
   const { teams, status, currentQuestion, currentQuestionIndex, buzzedBy, players, miniGameType } = gameState;
+  const connectedPlayerCount = teams.reduce((sum, t) => sum + ((players[t.id] || []).filter((p) => p.connected !== false).length), 0);
   const buzzedTeam = buzzedBy ? teams.find((t) => t.id === buzzedBy.teamId) : null;
   const timerPercent = timer !== null && currentQuestion?.timeLimit ? (timer / currentQuestion.timeLimit) * 100 : 100;
   const isBuzzerMode = status === "buzzer_active" || status === "buzzed";
@@ -264,7 +265,7 @@ export default function AdminGame() {
 
   return (
     <div className={`min-h-screen transition-all duration-300 ${buzzFlash ? "bg-orange-950" : "bg-gray-950"} text-white`}>
-      {showSelector && <MiniGameSelector teams={teams} onSelect={handleSelectMiniGame} onClose={() => setShowSelector(false)} />}
+      {showSelector && <MiniGameSelector teams={teams} connectedPlayerCount={connectedPlayerCount} onSelect={handleSelectMiniGame} onClose={() => setShowSelector(false)} />}
 
       {/* Question picker modal */}
       {showQuestionPicker && (

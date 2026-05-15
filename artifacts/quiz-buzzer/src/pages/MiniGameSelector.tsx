@@ -7,6 +7,7 @@ interface PuzzleData {
 
 interface Props {
   teams: { id: string }[];
+  connectedPlayerCount: number;
   onSelect: (type: MiniGameType, data?: PuzzleData) => void;
   onClose: () => void;
 }
@@ -32,9 +33,10 @@ const GAMES = [
   { type: "mystery_puzzle" as MiniGameType, icon: "🔐", name: "Mystery Puzzle", desc: "Split-screen vault crack. Each team gets their own 4 clues — solve them, then figure out the unlock order.", color: "bg-amber-950 border-amber-700 hover:border-amber-400" },
 ];
 
-export default function MiniGameSelector({ teams, onSelect, onClose }: Props) {
+export default function MiniGameSelector({ teams, connectedPlayerCount, onSelect, onClose }: Props) {
   const [hasSavedMystery, setHasSavedMystery] = useState(false);
   const [mysteryError, setMysteryError] = useState("");
+  const noPlayers = connectedPlayerCount === 0;
 
   useEffect(() => {
     const saved = loadSavedV2();
@@ -85,6 +87,11 @@ export default function MiniGameSelector({ teams, onSelect, onClose }: Props) {
             ✓ Saved Mystery Puzzle ready
           </div>
         )}
+        {noPlayers && (
+          <div className="bg-blue-950/40 border border-blue-700 rounded-lg p-2 text-center text-xs text-blue-300 mb-3">
+            🎤 <span className="font-bold">Host-only mode</span> — no player phones connected. Number Survival needs phones to play; Face Merge and Mystery Puzzle work fine (Mystery has a host keypad).
+          </div>
+        )}
         {mysteryError && (
           <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-3">
             {mysteryError}
@@ -92,17 +99,28 @@ export default function MiniGameSelector({ teams, onSelect, onClose }: Props) {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {GAMES.map((game) => (
-            <button
-              key={game.type}
-              onClick={() => game.type === "mystery_puzzle" ? handleMysteryClick() : onSelect(game.type)}
-              className={`text-left rounded-xl p-4 border-2 transition-all ${game.color}`}
-            >
-              <div className="text-4xl mb-2">{game.icon}</div>
-              <div className="text-white font-black text-lg leading-tight">{game.name}</div>
-              <div className="text-gray-400 text-xs mt-1 leading-snug">{game.desc}</div>
-            </button>
-          ))}
+          {GAMES.map((game) => {
+            const requiresPhones = game.type === "number_survival";
+            const disabled = requiresPhones && noPlayers;
+            return (
+              <button
+                key={game.type}
+                onClick={() => {
+                  if (disabled) return;
+                  if (game.type === "mystery_puzzle") handleMysteryClick();
+                  else onSelect(game.type);
+                }}
+                disabled={disabled}
+                className={`text-left rounded-xl p-4 border-2 transition-all ${disabled ? "opacity-40 cursor-not-allowed border-gray-700 bg-gray-800" : game.color}`}
+                title={disabled ? "Needs at least 1 player phone connected" : ""}
+              >
+                <div className="text-4xl mb-2">{game.icon}</div>
+                <div className="text-white font-black text-lg leading-tight">{game.name}</div>
+                <div className="text-gray-400 text-xs mt-1 leading-snug">{game.desc}</div>
+                {disabled && <div className="text-blue-400 text-[10px] font-bold mt-1">⚠️ Needs phones — no players connected</div>}
+              </button>
+            );
+          })}
         </div>
 
         <button onClick={onClose} className="w-full mt-4 py-2 text-gray-600 hover:text-gray-400 text-sm transition">Cancel</button>

@@ -96,6 +96,7 @@ export default function MiniGameManager() {
   const [sets, setSets] = useState<FaceMergeSet[]>(loadFaceMergeSets);
   const [fmSavedNotice, setFmSavedNotice] = useState(false);
   const [fmError, setFmError] = useState("");
+  const [persistedSetCount, setPersistedSetCount] = useState<number>(() => loadFaceMergeSets().length);
 
   // Mystery Puzzle state (split team)
   const [mystery, setMystery] = useState<MysteryConfigV2>(loadMysteryV2);
@@ -152,6 +153,7 @@ export default function MiniGameManager() {
       localStorage.setItem(FACE_MERGE_SETS_KEY, payload);
       localStorage.removeItem(OLD_FACE_MERGE_KEY);
       setFmSavedNotice(true);
+      setPersistedSetCount(sets.length);
     } catch { setFmError(`Couldn't save — browser storage full (~${sizeMB.toFixed(1)} MB attempted). Remove some sets or use smaller images.`); }
   };
   const clearFaceMerge = () => {
@@ -159,6 +161,7 @@ export default function MiniGameManager() {
     localStorage.removeItem(FACE_MERGE_SETS_KEY);
     localStorage.removeItem(OLD_FACE_MERGE_KEY);
     setSets([]);
+    setPersistedSetCount(0);
   };
 
   // ---------- Mystery Puzzle handlers ----------
@@ -297,6 +300,13 @@ export default function MiniGameManager() {
           </div>
           {fmSavedNotice && <div className="bg-green-950/40 border border-green-700 rounded-lg p-2 text-center text-sm text-green-300 mb-4">✓ Saved.</div>}
           {fmError && <div className="bg-red-950/40 border border-red-700 rounded-lg p-2 text-center text-sm text-red-300 mb-4">{fmError}</div>}
+          <div className={`rounded-lg p-2 text-center text-xs mb-4 ${persistedSetCount > 0 ? "bg-gray-800 text-gray-300" : "bg-yellow-950/30 text-yellow-300 border border-yellow-800"}`}>
+            {persistedSetCount > 0 ? (
+              <>💾 Currently saved in this browser: <span className="font-bold text-white">{persistedSetCount}</span> set{persistedSetCount === 1 ? "" : "s"}{sets.length !== persistedSetCount && <span className="text-yellow-400"> · {sets.length} unsaved edit{sets.length === 1 ? "" : "s"} above — click Save</span>}</>
+            ) : (
+              <>⚠️ Nothing saved yet. Add sets above and click <span className="font-bold">Save</span>.</>
+            )}
+          </div>
           <div className="space-y-4">
             {sets.length === 0 && <div className="text-center py-8 text-gray-500 text-sm">No image sets yet.</div>}
             {sets.map((set, idx) => {

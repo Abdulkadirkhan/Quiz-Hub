@@ -11,6 +11,83 @@ interface Props {
   onEnd: (winnerTeamId?: string) => void;
 }
 
+// Host-side 4-digit keypad for entering a team's guess directly from the admin screen.
+// Used when no player phone is acting as the solver (host-only mode) or when the host
+// wants to enter on a team's behalf.
+function AdminKeypad({ teamId, teamName, digitsAvailable, onSubmit }: {
+  teamId: string;
+  teamName: string;
+  digitsAvailable: string[];
+  onSubmit: (code: string) => void;
+}) {
+  const [code, setCode] = useState<string[]>(["", "", "", ""]);
+  const [feedback, setFeedback] = useState<"idle" | "wrong">("idle");
+  void teamId;
+
+  const press = (d: string) => {
+    setFeedback("idle");
+    setCode((prev) => {
+      const next = [...prev];
+      const firstEmpty = next.findIndex((x) => x === "");
+      const target = firstEmpty === -1 ? 3 : firstEmpty;
+      next[target] = d;
+      return next;
+    });
+  };
+  const backspace = () => {
+    setFeedback("idle");
+    setCode((prev) => {
+      const next = [...prev];
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i] !== "") { next[i] = ""; break; }
+      }
+      return next;
+    });
+  };
+  const clear = () => { setCode(["", "", "", ""]); setFeedback("idle"); };
+  const submit = () => {
+    const joined = code.join("");
+    if (joined.length !== 4) return;
+    onSubmit(joined);
+    // We don't know correctness without the ack; clear and let the state update show success/winner
+    setTimeout(() => {
+      // If we're not winners after 600ms, treat as wrong locally
+      setFeedback("wrong");
+      setTimeout(() => { setCode(["", "", "", ""]); setFeedback("idle"); }, 500);
+    }, 600);
+  };
+
+  // Digit buttons — prefer using only the digits this team has (helps host avoid typos),
+  // but allow any digit if for some reason digits aren't yet revealed.
+  const allDigits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+  const digitsToShow = digitsAvailable.length === 4 ? digitsAvailable : allDigits;
+
+  return (
+    <div className="bg-gray-900/60 border border-amber-700 rounded-lg p-2 mt-2">
+      <p className="text-[10px] font-bold text-amber-300 uppercase mb-1 text-center">🖥️ Host keypad — submit for {teamName}</p>
+      <div className="flex justify-center gap-1 mb-2">
+        {code.map((d, i) => (
+          <div key={i} className={`w-10 h-12 rounded border-2 flex items-center justify-center font-mono font-black text-xl ${
+            feedback === "wrong" ? "border-red-500 bg-red-900/40 text-red-200" :
+            d ? "border-amber-400 bg-amber-950/40 text-amber-200" : "border-gray-700 bg-gray-800/40 text-gray-600"
+          }`}>{d || "_"}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-5 gap-1">
+        {digitsToShow.map((d, i) => (
+          <button key={i} onClick={() => press(d)} className="bg-white/10 hover:bg-white/20 text-white font-black text-sm py-1.5 rounded active:scale-95 transition">{d}</button>
+        ))}
+        {digitsToShow.length < 5 && Array.from({ length: 5 - digitsToShow.length }).map((_, i) => <span key={`pad-${i}`} />)}
+      </div>
+      <div className="grid grid-cols-3 gap-1 mt-1">
+        <button onClick={backspace} className="bg-white/10 hover:bg-white/20 text-white font-bold text-sm py-1.5 rounded">⌫</button>
+        <button onClick={clear} className="bg-white/10 hover:bg-white/20 text-white font-bold text-xs py-1.5 rounded">Clear</button>
+        <button onClick={submit} disabled={code.some((d) => !d)} className="bg-green-600 hover:bg-green-500 disabled:opacity-30 text-white font-black text-sm py-1.5 rounded">✓ Submit</button>
+      </div>
+    </div>
+  );
+}
+
 export default function MysteryPuzzleGame({ teams, socket, sessionId, gameState: initialState, onEnd }: Props) {
   const [gameState, setGameState] = useState<GameState>(initialState);
 
@@ -112,8 +189,22 @@ export default function MysteryPuzzleGame({ teams, socket, sessionId, gameState:
 
         {allDigitsRevealed && !td.vaultUnlocked && (
           <div className="bg-amber-950/30 border border-amber-700 rounded p-2 text-center">
-            <p className="text-amber-300 text-xs">All digits revealed. {solverName || "Solver"} now needs to enter them in the correct order on their phone.</p>
+            <p className="text-amber-300 text-xs">
+              {solverName
+                ? `All digits revealed. ${solverName} can enter them on their phone — or use the host keypad below.`
+                : "All digits revealed. No solver phone — use the host keypad below to enter the team's guess."}
+            </p>
           </div>
+        )}
+
+        {/* Host keypad — always available so the host can play without phones */}
+        {!td.vaultUnlocked && (
+          <AdminKeypad
+            teamId={team.id}
+            teamName={team.name}
+            digitsAvailable={td.clues.map((c) => c.digit).filter((d): d is string => d !== null)}
+            onSubmit={(code) => emit("admin:mystery_submit_code", { teamId: team.id, code })}
+          />
         )}
       </div>
     );
